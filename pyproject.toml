@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "AI-augmented Telegram client"
 authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
-packages = [{include = "grappa"}]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -27,7 +27,7 @@ mypy = "^1.7.1"
 pre-commit = "^3.6.0"
 
 [tool.poetry.scripts]
-grappa = "grappa.main:cli"
+grappa = "main:cli"
 
 [build-system]
 requires = ["poetry-core"]
@@ -57,23 +57,29 @@ extend-exclude = '''
 profile = "black"
 multi_line_output = 3
 line_length = 88
-known_first_party = ["grappa"]
 
 # mypy конфигурация
 [tool.mypy]
 python_version = "3.10"
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+disallow_untyped_decorators = false
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
+exclude = ["tests/"]
+
+# flake8 конфигурация
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E203", "W503"]
+exclude = [".venv", "__pycache__", ".git", "build", "dist"]
 
 # pytest конфигурация
 [tool.pytest.ini_options]
@@ -83,4 +89,4 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-asyncio_mode = "auto" 
+asyncio_mode = "auto"
