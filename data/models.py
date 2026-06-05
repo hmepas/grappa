@@ -55,6 +55,13 @@ class ChatInfo(BaseModel):
     is_inaccessible: bool = Field(
         default=False, description="Chat looks inaccessible/dead for this account"
     )
+    folder_ids: list[int] = Field(
+        default_factory=list, description="Telegram folder/filter ids containing chat"
+    )
+    folder_names: list[str] = Field(
+        default_factory=list, description="Telegram folder/filter names containing chat"
+    )
+    is_archived: bool = Field(default=False, description="Chat is in Telegram archive")
 
     @property
     def display_name(self) -> str:
@@ -64,6 +71,34 @@ class ChatInfo(BaseModel):
         if self.username:
             return f"@{self.username}"
         return f"Chat {self.id}"
+
+
+class FolderInfo(BaseModel):
+    """Information about a Telegram dialog folder/filter."""
+
+    id: int = Field(description="Telegram dialog filter id")
+    title: str = Field(description="Folder title")
+    explicit_chat_ids: list[int] = Field(
+        default_factory=list, description="Pinned or explicitly included chat ids"
+    )
+    excluded_chat_ids: list[int] = Field(
+        default_factory=list, description="Explicitly excluded chat ids"
+    )
+    include_contacts: bool = Field(default=False, description="Includes contacts")
+    include_non_contacts: bool = Field(
+        default=False, description="Includes non-contacts"
+    )
+    include_groups: bool = Field(default=False, description="Includes groups")
+    include_channels: bool = Field(default=False, description="Includes channels")
+    include_bots: bool = Field(default=False, description="Includes bots")
+    exclude_muted: bool = Field(default=False, description="Excludes muted chats")
+    exclude_read: bool = Field(default=False, description="Excludes read chats")
+    exclude_archived: bool = Field(default=False, description="Excludes archived chats")
+
+    @property
+    def explicit_count(self) -> int:
+        """Return number of explicit chats in this folder."""
+        return len(set(self.explicit_chat_ids))
 
 
 class MessageInfo(BaseModel):

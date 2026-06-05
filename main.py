@@ -9,7 +9,7 @@ from rich.table import Table
 
 from chat_manager import ChatManager
 from client import TelegramClient
-from data.models import ChatInfo, MessageInfo
+from data.models import ChatInfo, FolderInfo, MessageInfo
 from message_parser import MessageManager, parse_cli_date
 from storage.cache_storage import CacheStorage
 
@@ -72,6 +72,8 @@ async def sync_chats(limit: int) -> None:
     "--migrated", is_flag=True, help="Show only chats migrated to another chat"
 )
 @click.option("--inaccessible", is_flag=True, help="Show only inaccessible/dead chats")
+@click.option("--archived", is_flag=True, help="Show only archived chats")
+@click.option("--exclude-archived", is_flag=True, help="Hide archived chats")
 @click.option("--plain", is_flag=True, help="Print TSV rows without Rich table")
 @click.option("--ids-only", is_flag=True, help="Print only chat ids, one per line")
 async def chats_list(
@@ -83,6 +85,8 @@ async def chats_list(
     deactivated: bool,
     migrated: bool,
     inaccessible: bool,
+    archived: bool,
+    exclude_archived: bool,
     plain: bool,
     ids_only: bool,
 ) -> None:
@@ -91,6 +95,10 @@ async def chats_list(
         if private_only and non_private:
             raise click.ClickException(
                 "Use either --private-only or --non-private, not both"
+            )
+        if archived and exclude_archived:
+            raise click.ClickException(
+                "Use either --archived or --exclude-archived, not both"
             )
 
         manager = ChatManager()
@@ -105,6 +113,8 @@ async def chats_list(
             deactivated,
             migrated,
             inaccessible,
+            archived,
+            exclude_archived,
         )
         chats_result = filtered_chats if limit <= 0 else filtered_chats[:limit]
         _print_chats(
@@ -115,6 +125,72 @@ async def chats_list(
             ),
             plain=plain,
             ids_only=ids_only,
+        )
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@cli.group()
+def folders() -> None:
+    """Telegram folder commands."""
+
+
+@folders.command("sync")
+async def folders_sync() -> None:
+    """Synchronize Telegram folders cache."""
+    try:
+        manager = ChatManager()
+        folders_result = await manager.sync_folders()
+        console.print(f"✅ Synced {len(folders_result)} folders", style="green")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@folders.command("list")
+@click.option("--api", "from_api", is_flag=True, help="Force loading from Telegram API")
+@click.option("--plain", is_flag=True, help="Print TSV rows without Rich table")
+@click.option("--ids-only", is_flag=True, help="Print only folder ids, one per line")
+async def folders_list(from_api: bool, plain: bool, ids_only: bool) -> None:
+    """List Telegram folders."""
+    try:
+        manager = ChatManager()
+        folders_result = await manager.list_folders(cached=not from_api)
+        _print_folders(folders_result, plain=plain, ids_only=ids_only)
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@folders.command("chats")
+@click.argument("folder")
+@click.option("--limit", default=20, help="Limit number of chats to show; 0 means all")
+@click.option("--plain", is_flag=True, help="Print TSV rows without Rich table")
+@click.option("--ids-only", is_flag=True, help="Print only chat ids, one per line")
+async def folders_chats(folder: str, limit: int, plain: bool, ids_only: bool) -> None:
+    """List cached chats belonging to a Telegram folder by id or title."""
+    try:
+        manager = ChatManager()
+        chats_result = await manager.list_chats_by_folder(folder, limit=limit)
+        _print_chats(
+            chats_result,
+            title=f"Folder chats: {folder}",
+            plain=plain,
+            ids_only=ids_only,
+        )
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@chats.command("refresh-archive")
+async def chats_refresh_archive() -> None:
+    """Refresh archived flag for cached chats."""
+    try:
+        manager = ChatManager()
+        console.print("⏳ Refreshing archived chat flags...", style="yellow")
+        chats_result = await manager.refresh_archived_status()
+        archived_count = sum(1 for chat in chats_result if chat.is_archived)
+        console.print(
+            f"✅ Refreshed {len(chats_result)} chats: {archived_count} archived",
+            style="green",
         )
     except Exception as e:
         console.print(f"❌ Error: {e}", style="red")
@@ -279,6 +355,8 @@ async def chats_info(chat: str, plain: bool, ids_only: bool) -> None:
     "--migrated", is_flag=True, help="Show only chats migrated to another chat"
 )
 @click.option("--inaccessible", is_flag=True, help="Show only inaccessible/dead chats")
+@click.option("--archived", is_flag=True, help="Show only archived chats")
+@click.option("--exclude-archived", is_flag=True, help="Hide archived chats")
 @click.option("--plain", is_flag=True, help="Print TSV rows without Rich table")
 @click.option("--ids-only", is_flag=True, help="Print only chat ids, one per line")
 async def list_chats(
@@ -290,6 +368,8 @@ async def list_chats(
     deactivated: bool,
     migrated: bool,
     inaccessible: bool,
+    archived: bool,
+    exclude_archived: bool,
     plain: bool,
     ids_only: bool,
 ) -> None:
@@ -298,6 +378,10 @@ async def list_chats(
         if private_only and non_private:
             raise click.ClickException(
                 "Use either --private-only or --non-private, not both"
+            )
+        if archived and exclude_archived:
+            raise click.ClickException(
+                "Use either --archived or --exclude-archived, not both"
             )
 
         manager = ChatManager()
@@ -312,6 +396,8 @@ async def list_chats(
             deactivated,
             migrated,
             inaccessible,
+            archived,
+            exclude_archived,
         )
         chats_result = filtered_chats if limit <= 0 else filtered_chats[:limit]
         _print_chats(
@@ -426,6 +512,8 @@ def _filter_chats(
     deactivated: bool,
     migrated: bool,
     inaccessible: bool,
+    archived: bool,
+    exclude_archived: bool,
 ) -> list[ChatInfo]:
     """Filter chats by CLI flags."""
     chats_list_result = list(chats_result)
@@ -451,6 +539,10 @@ def _filter_chats(
         chats_list_result = [
             chat for chat in chats_list_result if _is_chat_inaccessible(chat)
         ]
+    if archived:
+        chats_list_result = [chat for chat in chats_list_result if chat.is_archived]
+    if exclude_archived:
+        chats_list_result = [chat for chat in chats_list_result if not chat.is_archived]
     return chats_list_result
 
 
@@ -467,6 +559,8 @@ def _is_chat_inaccessible(chat: ChatInfo) -> bool:
 def _chat_status(chat: ChatInfo) -> str:
     """Build compact chat status string."""
     statuses = []
+    if chat.is_archived:
+        statuses.append("archived")
     if chat.is_deactivated:
         statuses.append("deactivated")
     if chat.migrated_to_chat_id is not None:
@@ -502,6 +596,7 @@ def _print_chats(
     table.add_column("Type", style="magenta")
     table.add_column("Username", style="blue")
     table.add_column("Members", style="yellow")
+    table.add_column("Folders", style="cyan")
     table.add_column("Status", style="red")
 
     for chat in chats_list_result:
@@ -511,9 +606,76 @@ def _print_chats(
             chat.type,
             f"@{chat.username}" if chat.username else "—",
             str(chat.members_count) if chat.members_count is not None else "—",
+            ", ".join(chat.folder_names) if chat.folder_names else "—",
             _chat_status(chat),
         )
     console.print(table)
+
+
+def _print_folders(
+    folders_result: Iterable[FolderInfo], plain: bool = False, ids_only: bool = False
+) -> None:
+    """Print folders as Rich table, TSV, or ids-only."""
+    folders_list_result = list(folders_result)
+    if ids_only:
+        for folder in folders_list_result:
+            click.echo(str(folder.id))
+        return
+    if plain:
+        for folder in folders_list_result:
+            click.echo(_folder_tsv_row(folder))
+        return
+    if not folders_list_result:
+        console.print("No folders found", style="yellow")
+        return
+
+    table = Table(title=f"Folders ({len(folders_list_result)})")
+    table.add_column("ID", style="cyan")
+    table.add_column("Title", style="green")
+    table.add_column("Explicit chats", style="yellow")
+    table.add_column("Rules", style="magenta")
+
+    for folder in folders_list_result:
+        table.add_row(
+            str(folder.id),
+            folder.title,
+            str(folder.explicit_count),
+            _folder_rules(folder),
+        )
+    console.print(table)
+
+
+def _folder_rules(folder: FolderInfo) -> str:
+    """Build compact folder rule description."""
+    rules = []
+    if folder.include_contacts:
+        rules.append("contacts")
+    if folder.include_non_contacts:
+        rules.append("non_contacts")
+    if folder.include_groups:
+        rules.append("groups")
+    if folder.include_channels:
+        rules.append("channels")
+    if folder.include_bots:
+        rules.append("bots")
+    if folder.exclude_muted:
+        rules.append("exclude_muted")
+    if folder.exclude_read:
+        rules.append("exclude_read")
+    if folder.exclude_archived:
+        rules.append("exclude_archived")
+    return ", ".join(rules) if rules else "—"
+
+
+def _folder_tsv_row(folder: FolderInfo) -> str:
+    """Serialize folder as headerless TSV row for scripts."""
+    fields = [
+        str(folder.id),
+        folder.title,
+        str(folder.explicit_count),
+        _folder_rules(folder),
+    ]
+    return "\t".join(field.replace("\t", " ").replace("\n", " ") for field in fields)
 
 
 def _chat_tsv_row(chat: ChatInfo) -> str:
@@ -523,6 +685,8 @@ def _chat_tsv_row(chat: ChatInfo) -> str:
         chat.type,
         "" if chat.members_count is None else str(chat.members_count),
         chat.username or "",
+        ",".join(chat.folder_names),
+        str(chat.is_archived).lower(),
         str(chat.is_deactivated).lower(),
         "" if chat.migrated_to_chat_id is None else str(chat.migrated_to_chat_id),
         str(_is_chat_inaccessible(chat)).lower(),

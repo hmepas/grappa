@@ -30,6 +30,9 @@
 - `poetry run python main.py chats search "query"` - поиск чатов по кешу
 - `poetry run python main.py messages download <chat> --limit N --media` - скачать сообщения и медиа
 - `poetry run python main.py messages search "query" [--chat <chat>] [--api]` - поиск сообщений
+- `poetry run python main.py folders sync` - синхронизировать Telegram folders
+- `poetry run python main.py folders list` - список folders
+- `poetry run python main.py folders chats <folder>` - чаты из выбранной папки
 - `poetry run python main.py list-chats --limit N` - старый alias для списка чатов
 
 ## 🚀 Планируемые возможности
@@ -108,8 +111,21 @@ poetry run python main.py test-connection
 ```bash
 poetry run python main.py chats sync --limit 0
 poetry run python main.py chats list --limit 10
+poetry run python main.py chats list --archived --limit 10
+poetry run python main.py chats list --exclude-archived --limit 10
+poetry run python main.py chats refresh-archive
 poetry run python main.py chats search "telegram"
 ```
+
+### Telegram folders
+```bash
+poetry run python main.py folders sync
+poetry run python main.py folders list
+poetry run python main.py folders chats WB --limit 20
+poetry run python main.py folders chats 8 --ids-only
+```
+
+После `folders sync` список чатов также показывает папки, в которых находится чат.
 
 ### Скачать сообщения чата
 ```bash

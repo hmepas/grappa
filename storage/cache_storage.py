@@ -8,7 +8,7 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, Field, ValidationError
 
 from config import get_settings
-from data.models import ChatInfo, MessageInfo
+from data.models import ChatInfo, FolderInfo, MessageInfo
 
 CACHE_VERSION = "1"
 
@@ -47,6 +47,11 @@ class CacheStorage:
         return self.data_dir / "cache_metadata.json"
 
     @property
+    def folders_file(self) -> Path:
+        """Return path to folders cache file."""
+        return self.data_dir / "folders_cache.json"
+
+    @property
     def messages_dir(self) -> Path:
         """Return directory containing per-chat message caches."""
         return self.data_dir / "messages"
@@ -78,6 +83,24 @@ class CacheStorage:
             except ValidationError:
                 continue
         return chats
+
+    async def save_folders(self, folders: List[FolderInfo]) -> None:
+        """Persist folders cache."""
+        payload = [folder.model_dump(mode="json") for folder in folders]
+        self._write_json(self.folders_file, payload)
+
+    async def load_folders(self) -> List[FolderInfo]:
+        """Load cached folders."""
+        raw = self._read_json(self.folders_file, default=[])
+        folders: List[FolderInfo] = []
+        if not isinstance(raw, list):
+            return folders
+        for item in raw:
+            try:
+                folders.append(FolderInfo.model_validate(item))
+            except ValidationError:
+                continue
+        return folders
 
     async def save_messages(self, chat_id: int, messages: List[MessageInfo]) -> None:
         """Merge and persist messages for a chat."""

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from pyrogram.errors import FloodWait
 
 from client import TelegramClient
-from data.models import ChatInfo
+from data.models import ChatInfo, FolderInfo
 from storage.cache_storage import CacheStorage
 
 
@@ -40,6 +40,8 @@ class ChatManager:
         if cached and not force_refresh:
             chats = await self.storage.load_chats()
             if chats:
+                folders = await self.storage.load_folders()
+                chats = self._annotate_chats_with_folders(chats, folders)
                 return chats if limit <= 0 else chats[:limit]
         chats = await self.sync_chats(limit=limit)
         return chats if limit <= 0 else chats[:limit]
@@ -51,9 +53,55 @@ class ChatManager:
         large explicit limit from CLI.
         """
         async with self._client_context() as client:
+            folders = await client.get_folders()
+            archived_ids = await client.get_archived_chat_ids()
             chats = await client.get_dialogs(limit=limit)
+        chats = self._annotate_chats_with_folders(chats, folders)
+        chats = self._annotate_chats_with_archived(chats, set(archived_ids))
+        await self.storage.save_folders(folders)
         await self.storage.save_chats(chats)
         return chats
+
+    async def refresh_archived_status(self) -> List[ChatInfo]:
+        """Refresh archived flag for cached chats."""
+        chats = await self.storage.load_chats()
+        async with self._client_context() as client:
+            archived_ids = set(await client.get_archived_chat_ids())
+        updated = self._annotate_chats_with_archived(chats, archived_ids)
+        await self.storage.save_chats(updated)
+        return updated
+
+    async def sync_folders(self) -> List[FolderInfo]:
+        """Download Telegram folders and update local cache."""
+        async with self._client_context() as client:
+            folders = await client.get_folders()
+        await self.storage.save_folders(folders)
+        chats = await self.storage.load_chats()
+        if chats:
+            await self.storage.save_chats(
+                self._annotate_chats_with_folders(chats, folders)
+            )
+        return folders
+
+    async def list_folders(self, cached: bool = True) -> List[FolderInfo]:
+        """List Telegram folders from cache or API."""
+        if cached:
+            folders = await self.storage.load_folders()
+            if folders:
+                return folders
+        return await self.sync_folders()
+
+    async def list_chats_by_folder(
+        self, folder_ref: Union[int, str], limit: int = 50
+    ) -> List[ChatInfo]:
+        """List cached chats belonging to a selected folder."""
+        folders = await self.list_folders(cached=True)
+        folder = self._resolve_folder(folder_ref, folders)
+        if folder is None:
+            return []
+        chats = await self.list_chats(limit=0, cached=True)
+        selected = [chat for chat in chats if folder.id in chat.folder_ids]
+        return selected if limit <= 0 else selected[:limit]
 
     async def refresh_chat_statuses(self) -> List[ChatInfo]:
         """Refresh deactivated/migrated/inaccessible flags for cached suspect chats."""
@@ -197,6 +245,64 @@ class ChatManager:
         """Report progress if callback is provided."""
         if progress_callback:
             progress_callback(message)
+
+    def _annotate_chats_with_archived(
+        self, chats: List[ChatInfo], archived_ids: set[int]
+    ) -> List[ChatInfo]:
+        """Add archive flag to chats."""
+        return [
+            chat.model_copy(update={"is_archived": chat.id in archived_ids})
+            for chat in chats
+        ]
+
+    def _annotate_chats_with_folders(
+        self, chats: List[ChatInfo], folders: List[FolderInfo]
+    ) -> List[ChatInfo]:
+        """Add folder ids/names to chats according to cached folder definitions."""
+        annotated: List[ChatInfo] = []
+        for chat in chats:
+            folder_ids = []
+            folder_names = []
+            for folder in folders:
+                if self._chat_matches_folder(chat, folder):
+                    folder_ids.append(folder.id)
+                    folder_names.append(folder.title)
+            annotated.append(
+                chat.model_copy(
+                    update={"folder_ids": folder_ids, "folder_names": folder_names}
+                )
+            )
+        return annotated
+
+    def _chat_matches_folder(self, chat: ChatInfo, folder: FolderInfo) -> bool:
+        """Return whether chat matches folder definition known from API."""
+        if chat.id in folder.excluded_chat_ids:
+            return False
+        if chat.id in folder.explicit_chat_ids:
+            return True
+        if folder.exclude_muted or folder.exclude_read or folder.exclude_archived:
+            # Dynamic read/mute/archive state is not currently stored in ChatInfo,
+            # so avoid over-matching folders like "Unread".
+            return False
+        if folder.include_groups and chat.type in ("group", "supergroup"):
+            return True
+        if folder.include_channels and chat.type == "channel":
+            return True
+        if folder.include_bots and chat.type == "bot":
+            return True
+        # Contact/non-contact dynamic filters require user metadata that is not
+        # currently stored in ChatInfo; explicit peers are still handled.
+        return False
+
+    def _resolve_folder(
+        self, folder_ref: Union[int, str], folders: List[FolderInfo]
+    ) -> Optional[FolderInfo]:
+        """Resolve folder by id or case-insensitive title."""
+        raw = str(folder_ref).strip().lower()
+        for folder in folders:
+            if raw == str(folder.id) or raw == folder.title.lower():
+                return folder
+        return None
 
     async def resolve_chat(self, ref: Union[int, str]) -> Union[int, str]:
         """Resolve chat reference for Telegram API calls.

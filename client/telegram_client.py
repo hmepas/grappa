@@ -7,10 +7,11 @@ from typing import Any, List, Optional, Union, cast
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, SessionExpired, SessionRevoked
 from pyrogram.raw import functions
+from pyrogram.raw import types as raw_types
 from pyrogram.types import Chat, ChatPreview
 
 from config import get_settings
-from data.models import ChatInfo, MessageInfo, UserInfo
+from data.models import ChatInfo, FolderInfo, MessageInfo, UserInfo
 
 
 class TelegramClient:
@@ -83,6 +84,90 @@ class TelegramClient:
             dialogs.append(chat_info)
 
         return dialogs
+
+    async def get_archived_chat_ids(self, limit: int = 0) -> List[int]:
+        """Get chat ids from Telegram archive folder."""
+        if not self._client or not self._is_connected:
+            raise RuntimeError("Client not connected")
+
+        client = cast(Any, self._client)
+        result = await client.invoke(
+            functions.messages.GetDialogs(
+                offset_date=0,
+                offset_id=0,
+                offset_peer=raw_types.InputPeerEmpty(),
+                limit=limit or 10000,
+                hash=0,
+                folder_id=1,
+            )
+        )
+        archived_ids = []
+        for dialog in getattr(result, "dialogs", []) or []:
+            chat_id = self._peer_to_chat_id(getattr(dialog, "peer", None))
+            if chat_id is not None:
+                archived_ids.append(chat_id)
+        return list(dict.fromkeys(archived_ids))
+
+    async def get_folders(self) -> List[FolderInfo]:
+        """Get Telegram dialog folders/filters."""
+        if not self._client or not self._is_connected:
+            raise RuntimeError("Client not connected")
+
+        client = cast(Any, self._client)
+        raw_filters = await client.invoke(functions.messages.GetDialogFilters())
+        folders: List[FolderInfo] = []
+        for raw_filter in raw_filters:
+            folder_id = getattr(raw_filter, "id", None)
+            title = getattr(raw_filter, "title", None)
+            if folder_id is None or title is None:
+                continue
+
+            pinned_ids = [
+                chat_id
+                for chat_id in (
+                    self._input_peer_to_chat_id(peer)
+                    for peer in getattr(raw_filter, "pinned_peers", []) or []
+                )
+                if chat_id is not None
+            ]
+            included_ids = [
+                chat_id
+                for chat_id in (
+                    self._input_peer_to_chat_id(peer)
+                    for peer in getattr(raw_filter, "include_peers", []) or []
+                )
+                if chat_id is not None
+            ]
+            excluded_ids = [
+                chat_id
+                for chat_id in (
+                    self._input_peer_to_chat_id(peer)
+                    for peer in getattr(raw_filter, "exclude_peers", []) or []
+                )
+                if chat_id is not None
+            ]
+
+            folders.append(
+                FolderInfo(
+                    id=folder_id,
+                    title=title,
+                    explicit_chat_ids=list(dict.fromkeys(pinned_ids + included_ids)),
+                    excluded_chat_ids=list(dict.fromkeys(excluded_ids)),
+                    include_contacts=bool(getattr(raw_filter, "contacts", False)),
+                    include_non_contacts=bool(
+                        getattr(raw_filter, "non_contacts", False)
+                    ),
+                    include_groups=bool(getattr(raw_filter, "groups", False)),
+                    include_channels=bool(getattr(raw_filter, "broadcasts", False)),
+                    include_bots=bool(getattr(raw_filter, "bots", False)),
+                    exclude_muted=bool(getattr(raw_filter, "exclude_muted", False)),
+                    exclude_read=bool(getattr(raw_filter, "exclude_read", False)),
+                    exclude_archived=bool(
+                        getattr(raw_filter, "exclude_archived", False)
+                    ),
+                )
+            )
+        return folders
 
     async def get_chat_info(self, chat_id: Union[int, str]) -> ChatInfo:
         """Get information about a specific chat."""
@@ -254,6 +339,23 @@ class TelegramClient:
             media_type=media_type,
             media_file_id=self._extract_media_file_id(message, media_type),
         )
+
+    def _input_peer_to_chat_id(self, peer: object) -> Optional[int]:
+        """Convert raw InputPeer to Pyrogram-style chat id."""
+        return self._peer_to_chat_id(peer)
+
+    def _peer_to_chat_id(self, peer: object) -> Optional[int]:
+        """Convert raw Peer/InputPeer to Pyrogram-style chat id."""
+        user_id = getattr(peer, "user_id", None)
+        if user_id is not None:
+            return int(user_id)
+        chat_id = getattr(peer, "chat_id", None)
+        if chat_id is not None:
+            return -int(chat_id)
+        channel_id = getattr(peer, "channel_id", None)
+        if channel_id is not None:
+            return int(f"-100{channel_id}")
+        return None
 
     def _extract_media_file_id(
         self, message: object, media_type: Optional[str]
