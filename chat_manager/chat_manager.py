@@ -1,8 +1,10 @@
 """Chat cache, sync and search service."""
 
-from typing import List, Optional, Union
+import asyncio
+from typing import Callable, List, Optional, Union
 
 from pydantic import BaseModel
+from pyrogram.errors import FloodWait
 
 from client import TelegramClient
 from data.models import ChatInfo
@@ -16,6 +18,7 @@ class DeleteAndLeaveResult(BaseModel):
     resolved_chat_id: Optional[int] = None
     success: bool
     error: Optional[str] = None
+    flood_wait_seconds: Optional[int] = None
 
 
 class ChatManager:
@@ -97,45 +100,103 @@ class ChatManager:
         return [chat for _, chat in scored[:limit]]
 
     async def delete_and_leave_chats(
-        self, chat_refs: List[Union[int, str]]
+        self,
+        chat_refs: List[Union[int, str]],
+        delay_seconds: float = 15.0,
+        wait_on_flood: bool = True,
+        max_flood_wait_seconds: int = 900,
+        stop_on_flood: bool = False,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> List[DeleteAndLeaveResult]:
-        """Delete/leave multiple chats and remove successful ones from cache."""
+        """Delete/leave multiple chats with rate limiting and flood-wait handling."""
         results: List[DeleteAndLeaveResult] = []
         successful_ids: set[int] = set()
 
         async with self._client_context() as client:
-            for chat_ref in chat_refs:
-                resolved = await self.resolve_chat(chat_ref)
-                try:
-                    await client.delete_and_leave_chat(resolved)
-                    resolved_id = resolved if isinstance(resolved, int) else None
-                    if resolved_id is not None:
-                        successful_ids.add(resolved_id)
-                    results.append(
-                        DeleteAndLeaveResult(
-                            chat_ref=str(chat_ref),
-                            resolved_chat_id=resolved_id,
-                            success=True,
-                        )
+            for index, chat_ref in enumerate(chat_refs):
+                if index > 0 and delay_seconds > 0:
+                    self._report_progress(
+                        progress_callback,
+                        f"Waiting {delay_seconds:.1f}s before next delete/leave...",
                     )
-                except Exception as exc:
-                    results.append(
-                        DeleteAndLeaveResult(
-                            chat_ref=str(chat_ref),
-                            resolved_chat_id=resolved
-                            if isinstance(resolved, int)
-                            else None,
-                            success=False,
-                            error=str(exc),
-                        )
-                    )
+                    await asyncio.sleep(delay_seconds)
 
+                resolved = await self.resolve_chat(chat_ref)
+                while True:
+                    try:
+                        await client.delete_and_leave_chat(resolved)
+                        resolved_id = resolved if isinstance(resolved, int) else None
+                        if resolved_id is not None:
+                            successful_ids.add(resolved_id)
+                        results.append(
+                            DeleteAndLeaveResult(
+                                chat_ref=str(chat_ref),
+                                resolved_chat_id=resolved_id,
+                                success=True,
+                            )
+                        )
+                        break
+                    except FloodWait as exc:
+                        wait_seconds = int(exc.value)
+                        if (
+                            not wait_on_flood
+                            or wait_seconds > max_flood_wait_seconds
+                            or stop_on_flood
+                        ):
+                            results.append(
+                                DeleteAndLeaveResult(
+                                    chat_ref=str(chat_ref),
+                                    resolved_chat_id=resolved
+                                    if isinstance(resolved, int)
+                                    else None,
+                                    success=False,
+                                    error=str(exc),
+                                    flood_wait_seconds=wait_seconds,
+                                )
+                            )
+                            if stop_on_flood:
+                                return await self._finalize_delete_results(
+                                    results, successful_ids
+                                )
+                            break
+
+                        self._report_progress(
+                            progress_callback,
+                            f"Telegram requested FLOOD_WAIT {wait_seconds}s; sleeping and retrying {chat_ref}...",
+                        )
+                        await asyncio.sleep(wait_seconds + 1)
+                    except Exception as exc:
+                        results.append(
+                            DeleteAndLeaveResult(
+                                chat_ref=str(chat_ref),
+                                resolved_chat_id=resolved
+                                if isinstance(resolved, int)
+                                else None,
+                                success=False,
+                                error=str(exc),
+                            )
+                        )
+                        break
+
+        return await self._finalize_delete_results(results, successful_ids)
+
+    async def _finalize_delete_results(
+        self, results: List[DeleteAndLeaveResult], successful_ids: set[int]
+    ) -> List[DeleteAndLeaveResult]:
+        """Remove successfully processed chats from cache and return results."""
         if successful_ids:
             chats = await self.storage.load_chats()
             await self.storage.save_chats(
                 [chat for chat in chats if chat.id not in successful_ids]
             )
         return results
+
+    def _report_progress(
+        self, progress_callback: Optional[Callable[[str], None]], message: str
+    ) -> None:
+        """Report progress if callback is provided."""
+        if progress_callback:
+            progress_callback(message)
 
     async def resolve_chat(self, ref: Union[int, str]) -> Union[int, str]:
         """Resolve chat reference for Telegram API calls.

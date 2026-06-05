@@ -165,8 +165,39 @@ async def chats_search(query: str, limit: int, plain: bool, ids_only: bool) -> N
 @click.argument("chat_ids", nargs=-1, required=True, type=str)
 @click.option("--yes", is_flag=True, help="Confirm destructive operation")
 @click.option("--dry-run", is_flag=True, help="Only show what would be deleted/left")
+@click.option(
+    "--delay",
+    default=15.0,
+    show_default=True,
+    type=float,
+    help="Delay in seconds between delete/leave actions",
+)
+@click.option(
+    "--wait-flood/--no-wait-flood",
+    default=True,
+    show_default=True,
+    help="Sleep and retry when Telegram returns FLOOD_WAIT",
+)
+@click.option(
+    "--max-flood-wait",
+    default=900,
+    show_default=True,
+    type=int,
+    help="Maximum FLOOD_WAIT seconds to auto-sleep before treating it as error",
+)
+@click.option(
+    "--stop-on-flood",
+    is_flag=True,
+    help="Stop batch on first FLOOD_WAIT instead of continuing",
+)
 async def chats_delete_and_leave(
-    chat_ids: tuple[str, ...], yes: bool, dry_run: bool
+    chat_ids: tuple[str, ...],
+    yes: bool,
+    dry_run: bool,
+    delay: float,
+    wait_flood: bool,
+    max_flood_wait: int,
+    stop_on_flood: bool,
 ) -> None:
     """Delete private chats or leave groups/channels by chat ids."""
     try:
@@ -194,7 +225,14 @@ async def chats_delete_and_leave(
                 "This is destructive. Re-run with --yes to confirm"
             )
 
-        results = await manager.delete_and_leave_chats(list(chat_ids))
+        results = await manager.delete_and_leave_chats(
+            list(chat_ids),
+            delay_seconds=delay,
+            wait_on_flood=wait_flood,
+            max_flood_wait_seconds=max_flood_wait,
+            stop_on_flood=stop_on_flood,
+            progress_callback=lambda message: console.print(message, style="yellow"),
+        )
         for result in results:
             if result.success:
                 console.print(f"✅ {result.chat_ref}: deleted/left", style="green")
