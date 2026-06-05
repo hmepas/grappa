@@ -1,0 +1,159 @@
+"""Message download and search service."""
+
+from datetime import date, datetime, time, timezone
+from typing import List, Optional, Union
+
+from chat_manager import ChatManager
+from client import TelegramClient
+from config import get_settings
+from data.models import MessageInfo
+from storage.cache_storage import CacheStorage
+
+
+class MessageManager:
+    """High-level API for chat messages."""
+
+    def __init__(
+        self,
+        storage: Optional[CacheStorage] = None,
+        chat_manager: Optional[ChatManager] = None,
+        client: Optional[TelegramClient] = None,
+    ) -> None:
+        """Initialize manager with optional dependencies."""
+        self.storage = storage or CacheStorage()
+        self.chat_manager = chat_manager or ChatManager(storage=self.storage)
+        self.client = client
+        self.settings = get_settings()
+
+    async def download_chat(
+        self,
+        chat_ref: Union[int, str],
+        limit: int = 100,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        include_media: bool = False,
+    ) -> List[MessageInfo]:
+        """Download chat messages, cache them and optionally download media."""
+        resolved = await self.chat_manager.resolve_chat(chat_ref)
+        async with self._client_context() as client:
+            messages = await client.get_chat_messages(
+                chat_id=resolved,
+                limit=limit,
+                offset_date=to_date,
+            )
+            messages = self._filter_by_date(messages, from_date, to_date)
+            if include_media:
+                messages = await self._download_media(client, messages)
+
+        if messages:
+            await self.storage.save_messages(messages[0].chat_id, messages)
+        return messages
+
+    async def search_cached_messages(
+        self,
+        query: str,
+        chat_ref: Optional[Union[int, str]] = None,
+        limit: int = 50,
+    ) -> List[MessageInfo]:
+        """Search locally cached messages."""
+        normalized = query.lower()
+        if chat_ref is not None:
+            resolved = await self.chat_manager.resolve_chat(chat_ref)
+            chat_ids = [int(resolved)] if isinstance(resolved, int) else []
+        else:
+            chat_ids = [
+                int(path.stem) for path in self.storage.messages_dir.glob("*.json")
+            ]
+
+        found: List[MessageInfo] = []
+        for chat_id in chat_ids:
+            messages = await self.storage.load_messages(chat_id)
+            for message in messages:
+                if message.text and normalized in message.text.lower():
+                    found.append(message)
+                    if len(found) >= limit:
+                        return found
+        return found
+
+    async def search_telegram_messages(
+        self,
+        query: str,
+        chat_ref: Optional[Union[int, str]] = None,
+        limit: int = 50,
+        cache_results: bool = True,
+    ) -> List[MessageInfo]:
+        """Search messages via Telegram API globally or inside one chat."""
+        resolved: Optional[Union[int, str]] = None
+        if chat_ref is not None:
+            resolved = await self.chat_manager.resolve_chat(chat_ref)
+
+        async with self._client_context() as client:
+            messages = await client.search_messages(
+                query=query, chat_id=resolved, limit=limit
+            )
+
+        if cache_results:
+            by_chat: dict[int, List[MessageInfo]] = {}
+            for message in messages:
+                by_chat.setdefault(message.chat_id, []).append(message)
+            for chat_id, chat_messages in by_chat.items():
+                await self.storage.save_messages(chat_id, chat_messages)
+        return messages
+
+    async def _download_media(
+        self, client: TelegramClient, messages: List[MessageInfo]
+    ) -> List[MessageInfo]:
+        updated: List[MessageInfo] = []
+        for message in messages:
+            if not message.media_type:
+                updated.append(message)
+                continue
+            output_dir = self.settings.app.downloads_dir / str(message.chat_id)
+            path = await client.download_message_media(message, output_dir)
+            if path:
+                message = message.model_copy(update={"downloaded_media_path": path})
+            updated.append(message)
+        return updated
+
+    def _filter_by_date(
+        self,
+        messages: List[MessageInfo],
+        from_date: Optional[datetime],
+        to_date: Optional[datetime],
+    ) -> List[MessageInfo]:
+        filtered = []
+        for message in messages:
+            message_date = self._ensure_tz(message.date)
+            if from_date and message_date < self._ensure_tz(from_date):
+                continue
+            if to_date and message_date > self._ensure_tz(to_date):
+                continue
+            filtered.append(message)
+        return filtered
+
+    def _ensure_tz(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    def _client_context(self) -> TelegramClient:
+        return self.client or TelegramClient()
+
+
+def parse_cli_date(
+    value: Optional[str], end_of_day: bool = False
+) -> Optional[datetime]:
+    """Parse CLI date/datetime value.
+
+    Supports YYYY-MM-DD and ISO datetime strings.
+    """
+    if not value:
+        return None
+    if len(value) == 10:
+        parsed_date = date.fromisoformat(value)
+        parsed_time = time.max if end_of_day else time.min
+        return datetime.combine(parsed_date, parsed_time, tzinfo=timezone.utc)
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed

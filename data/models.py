@@ -1,6 +1,7 @@
 """Data models for the Telegram client application."""
 
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -37,6 +38,23 @@ class ChatInfo(BaseModel):
     username: Optional[str] = Field(default=None, description="Chat username")
     type: str = Field(description="Chat type (private, group, supergroup, channel)")
     members_count: Optional[int] = Field(default=None, description="Number of members")
+    last_seen: Optional[datetime] = Field(
+        default=None, description="Last seen in dialogs"
+    )
+    message_count: Optional[int] = Field(
+        default=None, description="Known message count"
+    )
+    activity_score: float = Field(default=0.0, description="Calculated activity score")
+    access_count: int = Field(default=0, description="How often chat was accessed")
+    is_deactivated: bool = Field(
+        default=False, description="Telegram marks chat as deactivated"
+    )
+    migrated_to_chat_id: Optional[int] = Field(
+        default=None, description="New chat id if this chat was migrated"
+    )
+    is_inaccessible: bool = Field(
+        default=False, description="Chat looks inaccessible/dead for this account"
+    )
 
     @property
     def display_name(self) -> str:
@@ -61,6 +79,12 @@ class MessageInfo(BaseModel):
     )
     media_type: Optional[str] = Field(
         default=None, description="Type of media (photo, video, document, etc.)"
+    )
+    media_file_id: Optional[str] = Field(
+        default=None, description="Telegram media file id"
+    )
+    downloaded_media_path: Optional[Path] = Field(
+        default=None, description="Local downloaded media path"
     )
 
     def get_message_link(self, chat_username: Optional[str] = None) -> Optional[str]:

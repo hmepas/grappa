@@ -36,6 +36,9 @@ class AppSettings(BaseSettings):
     session_dir: Path = Field(
         default=Path.cwd() / "sessions", description="Session directory"
     )
+    downloads_dir: Path = Field(
+        default=Path.cwd() / "downloads", description="Downloaded media directory"
+    )
 
     # Message processing settings
     max_messages_per_chat: int = Field(
@@ -54,7 +57,9 @@ class AppSettings(BaseSettings):
 class Settings(BaseSettings):
     """Combined application settings."""
 
-    telegram: TelegramSettings = Field(default_factory=lambda: TelegramSettings())
+    telegram: TelegramSettings = Field(
+        default_factory=lambda: TelegramSettings()  # type: ignore[call-arg]
+    )
     app: AppSettings = Field(default_factory=lambda: AppSettings())
 
     model_config = SettingsConfigDict(
@@ -65,10 +70,11 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs: object) -> None:
         """Initialize settings and create necessary directories."""
-        super().__init__(**kwargs)
+        super().__init__(**kwargs)  # type: ignore[arg-type]
         # Ensure directories exist
         self.app.data_dir.mkdir(exist_ok=True)
         self.app.session_dir.mkdir(exist_ok=True)
+        self.app.downloads_dir.mkdir(exist_ok=True)
 
 
 @lru_cache

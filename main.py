@@ -1,12 +1,17 @@
 """Main CLI application."""
 
 import asyncio
+from typing import Any, Callable, Iterable, Optional
 
 import click
 from rich.console import Console
 from rich.table import Table
 
+from chat_manager import ChatManager
 from client import TelegramClient
+from data.models import ChatInfo, MessageInfo
+from message_parser import MessageManager, parse_cli_date
+from storage.cache_storage import CacheStorage
 
 console = Console()
 
@@ -20,38 +25,6 @@ def cli(debug: bool) -> None:
 
 
 @cli.command()
-@click.option("--limit", default=20, help="Limit number of chats to show")
-async def list_chats(limit: int) -> None:
-    """List user's chats and dialogs."""
-    try:
-        async with TelegramClient() as client:
-            chats = await client.get_dialogs(limit=limit)
-
-            if not chats:
-                console.print("No chats found", style="yellow")
-                return
-
-            table = Table(title=f"Your Chats (showing {len(chats)} of {limit})")
-            table.add_column("ID", style="cyan")
-            table.add_column("Name", style="green")
-            table.add_column("Type", style="magenta")
-            table.add_column("Username", style="blue")
-
-            for chat in chats:
-                table.add_row(
-                    str(chat.id),
-                    chat.display_name,
-                    chat.type,
-                    f"@{chat.username}" if chat.username else "—",
-                )
-
-            console.print(table)
-
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
-
-
-@cli.command()
 async def test_connection() -> None:
     """Test connection to Telegram."""
     try:
@@ -60,19 +33,503 @@ async def test_connection() -> None:
             console.print(
                 f"✅ Connected successfully as: {me.display_name}", style="green"
             )
-
     except Exception as e:
         console.print(f"❌ Connection failed: {e}", style="red")
 
 
+@cli.group()
+def chats() -> None:
+    """Chat cache, sync and search commands."""
+
+
+@chats.command("sync")
+@click.option("--limit", default=0, help="How many dialogs to sync; 0 means all")
+async def sync_chats(limit: int) -> None:
+    """Synchronize local chat cache from Telegram."""
+    try:
+        manager = ChatManager()
+        console.print("⏳ Syncing chats from Telegram...", style="yellow")
+        chats_result = await manager.sync_chats(limit=limit)
+        console.print(f"✅ Synced {len(chats_result)} chats", style="green")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@chats.command("list")
+@click.option("--limit", default=20, help="Limit number of chats to show; 0 means all")
+@click.option("--api", "from_api", is_flag=True, help="Force loading from Telegram API")
+@click.option("--private-only", is_flag=True, help="Show only 1-on-1 private chats")
+@click.option(
+    "--non-private", is_flag=True, help="Show all chats except 1-on-1 private chats"
+)
+@click.option(
+    "--zero-members",
+    is_flag=True,
+    help="Show only chats with members_count=0, usually inaccessible/dead chats",
+)
+@click.option("--deactivated", is_flag=True, help="Show only deactivated chats")
+@click.option(
+    "--migrated", is_flag=True, help="Show only chats migrated to another chat"
+)
+@click.option("--inaccessible", is_flag=True, help="Show only inaccessible/dead chats")
+@click.option("--plain", is_flag=True, help="Print TSV rows without Rich table")
+@click.option("--ids-only", is_flag=True, help="Print only chat ids, one per line")
+async def chats_list(
+    limit: int,
+    from_api: bool,
+    private_only: bool,
+    non_private: bool,
+    zero_members: bool,
+    deactivated: bool,
+    migrated: bool,
+    inaccessible: bool,
+    plain: bool,
+    ids_only: bool,
+) -> None:
+    """List chats from cache by default, or from Telegram API."""
+    try:
+        if private_only and non_private:
+            raise click.ClickException(
+                "Use either --private-only or --non-private, not both"
+            )
+
+        manager = ChatManager()
+        source_chats = await manager.list_chats(
+            limit=0, cached=not from_api, force_refresh=from_api
+        )
+        filtered_chats = _filter_chats(
+            source_chats,
+            private_only,
+            non_private,
+            zero_members,
+            deactivated,
+            migrated,
+            inaccessible,
+        )
+        chats_result = filtered_chats if limit <= 0 else filtered_chats[:limit]
+        _print_chats(
+            chats_result,
+            title=(
+                f"Chats: showing {len(chats_result)} of {len(filtered_chats)} "
+                f"filtered / {len(source_chats)} total"
+            ),
+            plain=plain,
+            ids_only=ids_only,
+        )
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@chats.command("refresh-status")
+async def chats_refresh_status() -> None:
+    """Refresh deactivated/migrated/inaccessible flags for cached chats."""
+    try:
+        manager = ChatManager()
+        console.print("⏳ Refreshing chat status flags...", style="yellow")
+        chats_result = await manager.refresh_chat_statuses()
+        inaccessible_count = sum(
+            1 for chat in chats_result if _is_chat_inaccessible(chat)
+        )
+        deactivated_count = sum(1 for chat in chats_result if chat.is_deactivated)
+        migrated_count = sum(
+            1 for chat in chats_result if chat.migrated_to_chat_id is not None
+        )
+        console.print(
+            f"✅ Refreshed {len(chats_result)} chats: "
+            f"{inaccessible_count} inaccessible, "
+            f"{deactivated_count} deactivated, {migrated_count} migrated",
+            style="green",
+        )
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@chats.command("search")
+@click.argument("query")
+@click.option("--limit", default=20, help="Limit results")
+@click.option("--plain", is_flag=True, help="Print TSV rows without Rich table")
+@click.option("--ids-only", is_flag=True, help="Print only chat ids, one per line")
+async def chats_search(query: str, limit: int, plain: bool, ids_only: bool) -> None:
+    """Search chats in local cache."""
+    try:
+        manager = ChatManager()
+        chats_result = await manager.search_chats(query=query, limit=limit)
+        _print_chats(
+            chats_result, title=f"Chat search: {query}", plain=plain, ids_only=ids_only
+        )
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@chats.command("delete-and-leave", context_settings={"ignore_unknown_options": True})
+@click.argument("chat_ids", nargs=-1, required=True, type=str)
+@click.option("--yes", is_flag=True, help="Confirm destructive operation")
+@click.option("--dry-run", is_flag=True, help="Only show what would be deleted/left")
+async def chats_delete_and_leave(
+    chat_ids: tuple[str, ...], yes: bool, dry_run: bool
+) -> None:
+    """Delete private chats or leave groups/channels by chat ids."""
+    try:
+        manager = ChatManager()
+        cached_chats = await manager.storage.load_chats()
+        cached_by_id = {chat.id: chat for chat in cached_chats}
+        resolved = [await manager.resolve_chat(chat_id) for chat_id in chat_ids]
+        console.print("Chats selected for delete/leave:", style="yellow")
+        for original, item in zip(chat_ids, resolved):
+            chat = cached_by_id.get(item) if isinstance(item, int) else None
+            if chat:
+                console.print(
+                    f"  - {chat.id}\t{chat.type}\t"
+                    f"members={chat.members_count if chat.members_count is not None else 'unknown'}\t"
+                    f"{chat.display_name}\t{_chat_status(chat)}"
+                )
+            else:
+                console.print(f"  - {item} (from {original}; not found in cache)")
+
+        if dry_run:
+            console.print("Dry run: nothing was changed", style="green")
+            return
+        if not yes:
+            raise click.ClickException(
+                "This is destructive. Re-run with --yes to confirm"
+            )
+
+        results = await manager.delete_and_leave_chats(list(chat_ids))
+        for result in results:
+            if result.success:
+                console.print(f"✅ {result.chat_ref}: deleted/left", style="green")
+            else:
+                console.print(f"❌ {result.chat_ref}: {result.error}", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@chats.command("info")
+@click.argument("chat")
+@click.option("--plain", is_flag=True, help="Print TSV rows without Rich table")
+@click.option("--ids-only", is_flag=True, help="Print only chat ids, one per line")
+async def chats_info(chat: str, plain: bool, ids_only: bool) -> None:
+    """Show one chat info by id, @username, username or title substring."""
+    try:
+        manager = ChatManager()
+        found = await manager.search_chats(chat, limit=1)
+        if found:
+            _print_chats(found, title="Chat info", plain=plain, ids_only=ids_only)
+            return
+        async with TelegramClient() as client:
+            info = await client.get_chat_info(chat)
+        _print_chats([info], title="Chat info", plain=plain, ids_only=ids_only)
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+# Backward-compatible old command.
+@cli.command("list-chats")
+@click.option("--limit", default=20, help="Limit number of chats to show; 0 means all")
+@click.option("--api", "from_api", is_flag=True, help="Force loading from Telegram API")
+@click.option("--private-only", is_flag=True, help="Show only 1-on-1 private chats")
+@click.option(
+    "--non-private", is_flag=True, help="Show all chats except 1-on-1 private chats"
+)
+@click.option(
+    "--zero-members",
+    is_flag=True,
+    help="Show only chats with members_count=0, usually inaccessible/dead chats",
+)
+@click.option("--deactivated", is_flag=True, help="Show only deactivated chats")
+@click.option(
+    "--migrated", is_flag=True, help="Show only chats migrated to another chat"
+)
+@click.option("--inaccessible", is_flag=True, help="Show only inaccessible/dead chats")
+@click.option("--plain", is_flag=True, help="Print TSV rows without Rich table")
+@click.option("--ids-only", is_flag=True, help="Print only chat ids, one per line")
+async def list_chats(
+    limit: int,
+    from_api: bool,
+    private_only: bool,
+    non_private: bool,
+    zero_members: bool,
+    deactivated: bool,
+    migrated: bool,
+    inaccessible: bool,
+    plain: bool,
+    ids_only: bool,
+) -> None:
+    """List user's chats. Alias for `chats list`."""
+    try:
+        if private_only and non_private:
+            raise click.ClickException(
+                "Use either --private-only or --non-private, not both"
+            )
+
+        manager = ChatManager()
+        source_chats = await manager.list_chats(
+            limit=0, cached=not from_api, force_refresh=from_api
+        )
+        filtered_chats = _filter_chats(
+            source_chats,
+            private_only,
+            non_private,
+            zero_members,
+            deactivated,
+            migrated,
+            inaccessible,
+        )
+        chats_result = filtered_chats if limit <= 0 else filtered_chats[:limit]
+        _print_chats(
+            chats_result,
+            title=(
+                f"Chats: showing {len(chats_result)} of {len(filtered_chats)} "
+                f"filtered / {len(source_chats)} total"
+            ),
+            plain=plain,
+            ids_only=ids_only,
+        )
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@cli.group()
+def messages() -> None:
+    """Message download and search commands."""
+
+
+@messages.command("download")
+@click.argument("chat")
+@click.option("--limit", default=100, help="How many messages to download; 0 means all")
+@click.option(
+    "--from", "from_date", default=None, help="Start date: YYYY-MM-DD or ISO datetime"
+)
+@click.option(
+    "--to", "to_date", default=None, help="End date: YYYY-MM-DD or ISO datetime"
+)
+@click.option("--media", is_flag=True, help="Download media files too")
+async def messages_download(
+    chat: str,
+    limit: int,
+    from_date: Optional[str],
+    to_date: Optional[str],
+    media: bool,
+) -> None:
+    """Download selected chat messages into local cache."""
+    try:
+        manager = MessageManager()
+        console.print("⏳ Downloading messages...", style="yellow")
+        messages_result = await manager.download_chat(
+            chat_ref=chat,
+            limit=limit,
+            from_date=parse_cli_date(from_date),
+            to_date=parse_cli_date(to_date, end_of_day=True),
+            include_media=media,
+        )
+        console.print(
+            f"✅ Downloaded/cached {len(messages_result)} messages", style="green"
+        )
+        _print_messages(messages_result[:20], title="Downloaded messages preview")
+        if len(messages_result) > 20:
+            console.print(f"... and {len(messages_result) - 20} more", style="dim")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@messages.command("search")
+@click.argument("query")
+@click.option("--chat", default=None, help="Search inside one chat only")
+@click.option("--limit", default=50, help="Limit results")
+@click.option(
+    "--api",
+    "from_api",
+    is_flag=True,
+    help="Search via Telegram API instead of local cache",
+)
+async def messages_search(
+    query: str, chat: Optional[str], limit: int, from_api: bool
+) -> None:
+    """Search messages globally or inside one chat."""
+    try:
+        manager = MessageManager()
+        if from_api:
+            messages_result = await manager.search_telegram_messages(
+                query=query, chat_ref=chat, limit=limit
+            )
+        else:
+            messages_result = await manager.search_cached_messages(
+                query=query, chat_ref=chat, limit=limit
+            )
+        _print_messages(messages_result, title=f"Message search: {query}")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@messages.command("list")
+@click.argument("chat")
+@click.option("--limit", default=50, help="Limit cached messages to show")
+async def messages_list(chat: str, limit: int) -> None:
+    """List cached messages for one chat."""
+    try:
+        storage = CacheStorage()
+        chat_ref = await ChatManager(storage=storage).resolve_chat(chat)
+        if not isinstance(chat_ref, int):
+            console.print(
+                "❌ Chat not found in cache; run `chats sync` first", style="red"
+            )
+            return
+        messages_result = await storage.load_messages(chat_ref)
+        _print_messages(messages_result[-limit:], title=f"Cached messages: {chat}")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+def _filter_chats(
+    chats_result: Iterable[ChatInfo],
+    private_only: bool,
+    non_private: bool,
+    zero_members: bool,
+    deactivated: bool,
+    migrated: bool,
+    inaccessible: bool,
+) -> list[ChatInfo]:
+    """Filter chats by CLI flags."""
+    chats_list_result = list(chats_result)
+    if private_only:
+        chats_list_result = [
+            chat for chat in chats_list_result if chat.type == "private"
+        ]
+    if non_private:
+        chats_list_result = [
+            chat for chat in chats_list_result if chat.type != "private"
+        ]
+    if zero_members:
+        chats_list_result = [
+            chat for chat in chats_list_result if chat.members_count == 0
+        ]
+    if deactivated:
+        chats_list_result = [chat for chat in chats_list_result if chat.is_deactivated]
+    if migrated:
+        chats_list_result = [
+            chat for chat in chats_list_result if chat.migrated_to_chat_id is not None
+        ]
+    if inaccessible:
+        chats_list_result = [
+            chat for chat in chats_list_result if _is_chat_inaccessible(chat)
+        ]
+    return chats_list_result
+
+
+def _is_chat_inaccessible(chat: ChatInfo) -> bool:
+    """Return whether chat looks inaccessible/dead for this account."""
+    return (
+        chat.is_inaccessible
+        or chat.is_deactivated
+        or chat.migrated_to_chat_id is not None
+        or (chat.type != "private" and chat.members_count == 0)
+    )
+
+
+def _chat_status(chat: ChatInfo) -> str:
+    """Build compact chat status string."""
+    statuses = []
+    if chat.is_deactivated:
+        statuses.append("deactivated")
+    if chat.migrated_to_chat_id is not None:
+        statuses.append(f"migrated→{chat.migrated_to_chat_id}")
+    if _is_chat_inaccessible(chat):
+        statuses.append("inaccessible")
+    return ", ".join(statuses) if statuses else "—"
+
+
+def _print_chats(
+    chats_result: Iterable[ChatInfo],
+    title: str,
+    plain: bool = False,
+    ids_only: bool = False,
+) -> None:
+    chats_list_result = list(chats_result)
+    if ids_only:
+        for chat in chats_list_result:
+            click.echo(str(chat.id))
+        return
+    if plain:
+        for chat in chats_list_result:
+            click.echo(_chat_tsv_row(chat))
+        return
+
+    if not chats_list_result:
+        console.print("No chats found", style="yellow")
+        return
+
+    table = Table(title=title)
+    table.add_column("ID", style="cyan")
+    table.add_column("Name", style="green")
+    table.add_column("Type", style="magenta")
+    table.add_column("Username", style="blue")
+    table.add_column("Members", style="yellow")
+    table.add_column("Status", style="red")
+
+    for chat in chats_list_result:
+        table.add_row(
+            str(chat.id),
+            chat.display_name,
+            chat.type,
+            f"@{chat.username}" if chat.username else "—",
+            str(chat.members_count) if chat.members_count is not None else "—",
+            _chat_status(chat),
+        )
+    console.print(table)
+
+
+def _chat_tsv_row(chat: ChatInfo) -> str:
+    """Serialize chat as headerless TSV row for scripts."""
+    fields = [
+        str(chat.id),
+        chat.type,
+        "" if chat.members_count is None else str(chat.members_count),
+        chat.username or "",
+        str(chat.is_deactivated).lower(),
+        "" if chat.migrated_to_chat_id is None else str(chat.migrated_to_chat_id),
+        str(_is_chat_inaccessible(chat)).lower(),
+        chat.display_name,
+    ]
+    return "\t".join(field.replace("\t", " ").replace("\n", " ") for field in fields)
+
+
+def _print_messages(messages_result: Iterable[MessageInfo], title: str) -> None:
+    messages_list_result = list(messages_result)
+    if not messages_list_result:
+        console.print("No messages found", style="yellow")
+        return
+
+    table = Table(title=title)
+    table.add_column("Chat", style="cyan")
+    table.add_column("ID", style="cyan")
+    table.add_column("Date", style="green")
+    table.add_column("Media", style="magenta")
+    table.add_column("Text", style="white")
+
+    for message in messages_list_result:
+        text = (message.text or "").replace("\n", " ")
+        if len(text) > 120:
+            text = text[:117] + "..."
+        table.add_row(
+            str(message.chat_id),
+            str(message.id),
+            message.date.isoformat(sep=" ", timespec="seconds"),
+            message.media_type or "—",
+            text,
+        )
+    console.print(table)
+
+
 def main() -> None:
     """Entry point with asyncio support."""
-    # Convert sync click commands to async
     import inspect
-    from typing import Any, Callable
 
-    for command in cli.commands.values():
-        if inspect.iscoroutinefunction(command.callback):
+    def wrap_command(command: click.Command) -> None:
+        if isinstance(command, click.Group):
+            for subcommand in command.commands.values():
+                wrap_command(subcommand)
+
+        if command.callback and inspect.iscoroutinefunction(command.callback):
             original_callback = command.callback
 
             def make_wrapper(callback: Callable[..., Any]) -> Callable[..., Any]:
@@ -83,6 +540,7 @@ def main() -> None:
 
             command.callback = make_wrapper(original_callback)
 
+    wrap_command(cli)
     cli()
 
 

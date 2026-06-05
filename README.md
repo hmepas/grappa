@@ -25,7 +25,12 @@
 
 **Готовые команды:**
 - `poetry run python main.py test-connection` - проверка подключения
-- `poetry run python main.py list-chats --limit N` - список чатов
+- `poetry run python main.py chats sync --limit 0` - синхронизировать кеш чатов
+- `poetry run python main.py chats list --limit N` - список чатов из кеша
+- `poetry run python main.py chats search "query"` - поиск чатов по кешу
+- `poetry run python main.py messages download <chat> --limit N --media` - скачать сообщения и медиа
+- `poetry run python main.py messages search "query" [--chat <chat>] [--api]` - поиск сообщений
+- `poetry run python main.py list-chats --limit N` - старый alias для списка чатов
 
 ## 🚀 Планируемые возможности
 
@@ -99,9 +104,35 @@ poetry run pre-commit install
 poetry run python main.py test-connection
 ```
 
-### Список ваших чатов
+### Синхронизация и список чатов
 ```bash
-poetry run python main.py list-chats --limit 10
+poetry run python main.py chats sync --limit 0
+poetry run python main.py chats list --limit 10
+poetry run python main.py chats search "telegram"
+```
+
+### Скачать сообщения чата
+```bash
+# последние 100 сообщений
+poetry run python main.py messages download @chat_username --limit 100
+
+# сообщения за дату/период, с медиа
+poetry run python main.py messages download @chat_username --from 2026-06-01 --to 2026-06-05 --limit 1000 --media
+
+# весь чат: осторожно, может быть очень долго
+poetry run python main.py messages download @chat_username --limit 0 --media
+```
+
+### Поиск сообщений
+```bash
+# по локальному кешу во всех скачанных чатах
+poetry run python main.py messages search "важный текст"
+
+# по локальному кешу внутри одного чата
+poetry run python main.py messages search "важный текст" --chat @chat_username
+
+# через Telegram API
+poetry run python main.py messages search "важный текст" --chat @chat_username --api
 ```
 
 ### Отладочный режим
