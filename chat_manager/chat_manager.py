@@ -11,6 +11,15 @@ from data.models import ChatInfo, FolderInfo
 from storage.cache_storage import CacheStorage
 
 
+class ArchiveResult(BaseModel):
+    """Result of archive/unarchive operation for one chat."""
+
+    chat_ref: str
+    resolved_chat_id: Optional[int] = None
+    success: bool
+    error: Optional[str] = None
+
+
 class DeleteAndLeaveResult(BaseModel):
     """Result of delete/leave operation for one chat."""
 
@@ -146,6 +155,52 @@ class ChatManager:
 
         scored.sort(key=lambda item: item[0], reverse=True)
         return [chat for _, chat in scored[:limit]]
+
+    async def set_chats_archived(
+        self, chat_refs: List[Union[int, str]], archived: bool
+    ) -> List[ArchiveResult]:
+        """Archive or unarchive multiple chats and update local cache."""
+        resolved_refs = [await self.resolve_chat(chat_ref) for chat_ref in chat_refs]
+        results: List[ArchiveResult] = []
+        successful_ids: set[int] = set()
+
+        async with self._client_context() as client:
+            for chat_ref, resolved in zip(chat_refs, resolved_refs):
+                try:
+                    await client.set_chats_archived([resolved], archived=archived)
+                    resolved_id = resolved if isinstance(resolved, int) else None
+                    if resolved_id is not None:
+                        successful_ids.add(resolved_id)
+                    results.append(
+                        ArchiveResult(
+                            chat_ref=str(chat_ref),
+                            resolved_chat_id=resolved_id,
+                            success=True,
+                        )
+                    )
+                except Exception as exc:
+                    results.append(
+                        ArchiveResult(
+                            chat_ref=str(chat_ref),
+                            resolved_chat_id=resolved
+                            if isinstance(resolved, int)
+                            else None,
+                            success=False,
+                            error=str(exc),
+                        )
+                    )
+
+        if successful_ids:
+            chats = await self.storage.load_chats()
+            await self.storage.save_chats(
+                [
+                    chat.model_copy(update={"is_archived": archived})
+                    if chat.id in successful_ids
+                    else chat
+                    for chat in chats
+                ]
+            )
+        return results
 
     async def delete_and_leave_chats(
         self,

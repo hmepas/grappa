@@ -85,6 +85,26 @@ class TelegramClient:
 
         return dialogs
 
+    async def set_chats_archived(
+        self, chat_ids: List[Union[int, str]], archived: bool
+    ) -> None:
+        """Move chats to archive or back to main dialog list."""
+        if not self._client or not self._is_connected:
+            raise RuntimeError("Client not connected")
+
+        client = cast(Any, self._client)
+        folder_id = 1 if archived else 0
+        folder_peers = []
+        for chat_id in chat_ids:
+            input_peer = await client.resolve_peer(chat_id)
+            folder_peers.append(
+                raw_types.InputFolderPeer(peer=input_peer, folder_id=folder_id)
+            )
+        if folder_peers:
+            await client.invoke(
+                functions.folders.EditPeerFolders(folder_peers=folder_peers)
+            )
+
     async def get_archived_chat_ids(self, limit: int = 0) -> List[int]:
         """Get chat ids from Telegram archive folder."""
         if not self._client or not self._is_connected:

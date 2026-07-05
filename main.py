@@ -237,6 +237,26 @@ async def chats_search(query: str, limit: int, plain: bool, ids_only: bool) -> N
         console.print(f"❌ Error: {e}", style="red")
 
 
+@chats.command("archive", context_settings={"ignore_unknown_options": True})
+@click.argument("chat_ids", nargs=-1, required=True, type=str)
+@click.option("--yes", is_flag=True, help="Confirm archive operation")
+@click.option("--dry-run", is_flag=True, help="Only show what would be archived")
+async def chats_archive(chat_ids: tuple[str, ...], yes: bool, dry_run: bool) -> None:
+    """Move chats to Telegram archive by chat ids."""
+    await _set_chats_archived_command(chat_ids, archived=True, yes=yes, dry_run=dry_run)
+
+
+@chats.command("unarchive", context_settings={"ignore_unknown_options": True})
+@click.argument("chat_ids", nargs=-1, required=True, type=str)
+@click.option("--yes", is_flag=True, help="Confirm unarchive operation")
+@click.option("--dry-run", is_flag=True, help="Only show what would be unarchived")
+async def chats_unarchive(chat_ids: tuple[str, ...], yes: bool, dry_run: bool) -> None:
+    """Move chats out of Telegram archive by chat ids."""
+    await _set_chats_archived_command(
+        chat_ids, archived=False, yes=yes, dry_run=dry_run
+    )
+
+
 @chats.command("delete-and-leave", context_settings={"ignore_unknown_options": True})
 @click.argument("chat_ids", nargs=-1, required=True, type=str)
 @click.option("--yes", is_flag=True, help="Confirm destructive operation")
@@ -500,6 +520,46 @@ async def messages_list(chat: str, limit: int) -> None:
             return
         messages_result = await storage.load_messages(chat_ref)
         _print_messages(messages_result[-limit:], title=f"Cached messages: {chat}")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+async def _set_chats_archived_command(
+    chat_ids: tuple[str, ...], archived: bool, yes: bool, dry_run: bool
+) -> None:
+    """Shared CLI implementation for archive/unarchive commands."""
+    action = "archive" if archived else "unarchive"
+    try:
+        manager = ChatManager()
+        cached_chats = await manager.storage.load_chats()
+        cached_by_id = {chat.id: chat for chat in cached_chats}
+        resolved = [await manager.resolve_chat(chat_id) for chat_id in chat_ids]
+        console.print(f"Chats selected to {action}:", style="yellow")
+        for original, item in zip(chat_ids, resolved):
+            chat = cached_by_id.get(item) if isinstance(item, int) else None
+            if chat:
+                console.print(
+                    f"  - {chat.id}\t{chat.type}\t"
+                    f"archived={str(chat.is_archived).lower()}\t"
+                    f"{chat.display_name}\t{_chat_status(chat)}"
+                )
+            else:
+                console.print(f"  - {item} (from {original}; not found in cache)")
+
+        if dry_run:
+            console.print("Dry run: nothing was changed", style="green")
+            return
+        if not yes:
+            raise click.ClickException(
+                f"This changes Telegram folders. Re-run with --yes to {action}"
+            )
+
+        results = await manager.set_chats_archived(list(chat_ids), archived=archived)
+        for result in results:
+            if result.success:
+                console.print(f"✅ {result.chat_ref}: {action}d", style="green")
+            else:
+                console.print(f"❌ {result.chat_ref}: {result.error}", style="red")
     except Exception as e:
         console.print(f"❌ Error: {e}", style="red")
 

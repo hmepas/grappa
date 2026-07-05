@@ -1,5 +1,5 @@
 """Chat management services."""
 
-from .chat_manager import ChatManager, DeleteAndLeaveResult
+from .chat_manager import ArchiveResult, ChatManager, DeleteAndLeaveResult
 
-__all__ = ["ChatManager", "DeleteAndLeaveResult"]
+__all__ = ["ArchiveResult", "ChatManager", "DeleteAndLeaveResult"]

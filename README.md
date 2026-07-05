@@ -114,6 +114,9 @@ poetry run python main.py chats list --limit 10
 poetry run python main.py chats list --archived --limit 10
 poetry run python main.py chats list --exclude-archived --limit 10
 poetry run python main.py chats refresh-archive
+poetry run python main.py chats archive --dry-run <chat_id>
+poetry run python main.py chats archive --yes <chat_id>
+poetry run python main.py chats unarchive --yes <chat_id>
 poetry run python main.py chats search "telegram"
 ```
 
