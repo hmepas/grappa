@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "grappa"
-version = "0.1.0"
+version = "0.1.1"
 description = "AI-augmented Telegram client"
 authors = ["Pavel Khmelinsky <hmepas@gmail.com>"]
 readme = "README.md"
@@ -28,7 +28,7 @@ mypy = "^1.7.1"
 pre-commit = "^3.6.0"
 
 [tool.poetry.scripts]
-grappa = "grappa.main:cli"
+grappa = "grappa.main:main"
 
 [build-system]
 requires = ["poetry-core"]
