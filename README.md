@@ -75,7 +75,37 @@
 - Poetry для управления зависимостями
 - Telegram API credentials (api_id, api_hash)
 
-## 🛠️ Установка
+## 📦 Установка
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap hmepas/formulae
+brew install grappa
+```
+
+Или последнюю dev-версию из `main`:
+
+```bash
+brew install --HEAD hmepas/formulae/grappa
+```
+
+### Через curl (системы без Homebrew)
+
+Требуется Python 3.10–3.13:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hmepas/grappa/main/install.sh | bash
+```
+
+Скрипт ставит grappa в изолированный virtualenv (`~/.local/share/grappa`) и
+создаёт симлинк `~/.local/bin/grappa`.
+
+После установки настройте API-ключи (см. шаг «Настройте конфигурацию» ниже) —
+`.env` файл ищется в текущей директории, там же создаются `sessions/`, `data/`
+и `downloads/`.
+
+## 🛠️ Установка для разработки
 
 1. Клонируйте репозиторий:
 ```bash

@@ -2,9 +2,20 @@
 name = "grappa"
 version = "0.1.0"
 description = "AI-augmented Telegram client"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Pavel Khmelinsky <hmepas@gmail.com>"]
 readme = "README.md"
-package-mode = false
+repository = "https://github.com/hmepas/grappa"
+packages = [
+    { include = "main.py" },
+    { include = "chat_manager" },
+    { include = "client" },
+    { include = "config" },
+    { include = "data" },
+    { include = "message_parser" },
+    { include = "storage" },
+    { include = "utils" },
+]
+exclude = ["data/*.json", "data/messages", "**/__pycache__"]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.14"
