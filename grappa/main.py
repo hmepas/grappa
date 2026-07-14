@@ -1,19 +1,82 @@
 """Main CLI application."""
 
 import asyncio
+import sys
+from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 import click
+from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
 from grappa.chat_manager import ChatManager
 from grappa.client import TelegramClient
+from grappa.config import GLOBAL_ENV_FILE, get_settings
 from grappa.data.models import ChatInfo, FolderInfo, MessageInfo
 from grappa.message_parser import MessageManager, parse_cli_date
 from grappa.storage.cache_storage import CacheStorage
 
 console = Console()
+
+
+def _ensure_configured() -> None:
+    """Run first-time onboarding when Telegram API credentials are missing."""
+    if "--help" in sys.argv[1:]:
+        return
+    try:
+        get_settings()
+        return
+    except ValidationError as error:
+        validation_error = error
+
+    existing = [
+        path for path in (Path.cwd() / ".env", GLOBAL_ENV_FILE) if path.exists()
+    ]
+    if existing:
+        files = ", ".join(str(path) for path in existing)
+        console.print(
+            f"❌ Configuration in {files} is invalid:\n{validation_error}",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    console.print(
+        "⚙️  Grappa is not configured yet: Telegram API credentials are missing.",
+        style="yellow",
+    )
+    console.print(
+        "Get them at https://my.telegram.org/apps - "
+        f"answers will be saved to {GLOBAL_ENV_FILE}"
+    )
+    try:
+        api_id = click.prompt("TELEGRAM_API_ID", type=int)
+        api_hash = click.prompt("TELEGRAM_API_HASH")
+        phone = click.prompt(
+            "TELEGRAM_PHONE_NUMBER (e.g. +79991234567, Enter to skip)",
+            default="",
+            show_default=False,
+        )
+    except click.Abort:
+        console.print(
+            "\nAborted. Set TELEGRAM_API_ID / TELEGRAM_API_HASH via environment "
+            "variables or a .env file and retry.",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    lines = [f"TELEGRAM_API_ID={api_id}", f"TELEGRAM_API_HASH={api_hash}"]
+    if phone:
+        lines.append(f"TELEGRAM_PHONE_NUMBER={phone}")
+    GLOBAL_ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    GLOBAL_ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    try:
+        get_settings()
+    except ValidationError as error:
+        console.print(f"❌ Configuration is still invalid:\n{error}", style="red")
+        raise SystemExit(1)
+    console.print(f"✅ Credentials saved to {GLOBAL_ENV_FILE}", style="green")
 
 
 @click.group()
@@ -22,6 +85,7 @@ def cli(debug: bool) -> None:
     """Grappa - AI-augmented Telegram client."""
     if debug:
         console.print("🐛 Debug mode enabled", style="yellow")
+    _ensure_configured()
 
 
 @cli.command()

@@ -57,8 +57,9 @@ cat <<EOF
 
 grappa installed. Next steps:
   1. Get Telegram API credentials at https://my.telegram.org/apps
-  2. Export TELEGRAM_API_ID / TELEGRAM_API_HASH (or put them in a .env file)
-  3. Run: grappa test-connection
+  2. Run: grappa test-connection
+     (on first run grappa asks for the credentials and saves them
+      to ~/.config/grappa/config.env)
 
 To uninstall: rm -rf "$INSTALL_DIR" "$BIN_DIR/grappa"
 EOF

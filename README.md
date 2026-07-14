@@ -102,9 +102,11 @@ curl -fsSL https://raw.githubusercontent.com/hmepas/grappa/main/install.sh | bas
 Скрипт ставит grappa в изолированный virtualenv (`~/.local/share/grappa`) и
 создаёт симлинк `~/.local/bin/grappa`.
 
-После установки настройте API-ключи (см. шаг «Настройте конфигурацию» ниже) —
-`.env` файл ищется в текущей директории, там же создаются `sessions/`, `data/`
-и `downloads/`.
+При первом запуске grappa сам запросит Telegram API-ключи и сохранит их в
+`~/.config/grappa/config.env` (уважается `XDG_CONFIG_HOME`). Приоритет
+настроек: переменные окружения > `./.env` в текущей директории > глобальный
+конфиг. Рабочие файлы (`sessions/`, `data/`, `downloads/`) создаются в текущей
+директории, поэтому запускайте grappa из выделенной папки.
 
 ## 🛠️ Установка для разработки
 

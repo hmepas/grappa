@@ -1,5 +1,5 @@
 """Configuration module for the Telegram client."""
 
-from .settings import get_settings
+from .settings import GLOBAL_ENV_FILE, get_settings
 
-__all__ = ["get_settings"]
+__all__ = ["GLOBAL_ENV_FILE", "get_settings"]

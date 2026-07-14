@@ -1,11 +1,20 @@
 """Application settings and configuration."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+CONFIG_DIR = (
+    Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "grappa"
+)
+GLOBAL_ENV_FILE = CONFIG_DIR / "config.env"
+
+# Local ./.env takes priority over the global config file (later files win)
+_ENV_FILES = (str(GLOBAL_ENV_FILE), ".env")
 
 
 class TelegramSettings(BaseSettings):
@@ -18,7 +27,7 @@ class TelegramSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="TELEGRAM_",
-        env_file=".env",
+        env_file=_ENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore",  # Ignore extra fields
     )
@@ -48,7 +57,7 @@ class AppSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="GRAPPA_",
-        env_file=".env",
+        env_file=_ENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore",  # Ignore extra fields
     )
@@ -63,7 +72,7 @@ class Settings(BaseSettings):
     app: AppSettings = Field(default_factory=lambda: AppSettings())
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore",  # Ignore extra fields
     )
