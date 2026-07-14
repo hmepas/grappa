@@ -7,8 +7,8 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
-from config import get_settings
-from data.models import ChatInfo, FolderInfo, MessageInfo
+from grappa.config import get_settings
+from grappa.data.models import ChatInfo, FolderInfo, MessageInfo
 
 CACHE_VERSION = "1"
 

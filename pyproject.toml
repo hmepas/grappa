@@ -5,17 +5,7 @@ description = "AI-augmented Telegram client"
 authors = ["Pavel Khmelinsky <hmepas@gmail.com>"]
 readme = "README.md"
 repository = "https://github.com/hmepas/grappa"
-packages = [
-    { include = "main.py" },
-    { include = "chat_manager" },
-    { include = "client" },
-    { include = "config" },
-    { include = "data" },
-    { include = "message_parser" },
-    { include = "storage" },
-    { include = "utils" },
-]
-exclude = ["data/*.json", "data/messages", "**/__pycache__"]
+packages = [{ include = "grappa" }]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.14"
@@ -38,7 +28,7 @@ mypy = "^1.7.1"
 pre-commit = "^3.6.0"
 
 [tool.poetry.scripts]
-grappa = "main:cli"
+grappa = "grappa.main:cli"
 
 [build-system]
 requires = ["poetry-core"]

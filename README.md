@@ -24,16 +24,16 @@
 - ✅ Настройка через переменные окружения
 
 **Готовые команды:**
-- `poetry run python main.py test-connection` - проверка подключения
-- `poetry run python main.py chats sync --limit 0` - синхронизировать кеш чатов
-- `poetry run python main.py chats list --limit N` - список чатов из кеша
-- `poetry run python main.py chats search "query"` - поиск чатов по кешу
-- `poetry run python main.py messages download <chat> --limit N --media` - скачать сообщения и медиа
-- `poetry run python main.py messages search "query" [--chat <chat>] [--api]` - поиск сообщений
-- `poetry run python main.py folders sync` - синхронизировать Telegram folders
-- `poetry run python main.py folders list` - список folders
-- `poetry run python main.py folders chats <folder>` - чаты из выбранной папки
-- `poetry run python main.py list-chats --limit N` - старый alias для списка чатов
+- `poetry run grappa test-connection` - проверка подключения
+- `poetry run grappa chats sync --limit 0` - синхронизировать кеш чатов
+- `poetry run grappa chats list --limit N` - список чатов из кеша
+- `poetry run grappa chats search "query"` - поиск чатов по кешу
+- `poetry run grappa messages download <chat> --limit N --media` - скачать сообщения и медиа
+- `poetry run grappa messages search "query" [--chat <chat>] [--api]` - поиск сообщений
+- `poetry run grappa folders sync` - синхронизировать Telegram folders
+- `poetry run grappa folders list` - список folders
+- `poetry run grappa folders chats <folder>` - чаты из выбранной папки
+- `poetry run grappa list-chats --limit N` - старый alias для списка чатов
 
 ## 🚀 Планируемые возможности
 
@@ -47,23 +47,24 @@
 ## 🏗️ Архитектура проекта
 
 ```
-├── 📁 client/                  # Telegram клиент
-│   ├── __init__.py            # Экспорты модуля
-│   └── telegram_client.py     # Основной клиент с Pyrogram
-├── 📁 config/                 # Конфигурация
-│   ├── __init__.py
-│   └── settings.py           # Настройки через Pydantic Settings
-├── 📁 data/                  # Модели данных
-│   ├── __init__.py
-│   └── models.py             # UserInfo, ChatInfo, MessageInfo, MentionInfo
+├── 📁 grappa/                 # Python-пакет приложения
+│   ├── main.py               # CLI приложение (entry point `grappa`)
+│   ├── 📁 client/            # Telegram клиент
+│   │   ├── __init__.py       # Экспорты модуля
+│   │   └── telegram_client.py # Основной клиент с Pyrogram
+│   ├── 📁 config/            # Конфигурация
+│   │   └── settings.py       # Настройки через Pydantic Settings
+│   ├── 📁 data/              # Модели данных
+│   │   └── models.py         # UserInfo, ChatInfo, MessageInfo, MentionInfo
+│   ├── 📁 chat_manager/      # Управление чатами
+│   ├── 📁 message_parser/    # Парсинг сообщений
+│   ├── 📁 storage/           # Локальный кеш
+│   └── 📁 utils/             # 🚧 Утилиты (планируется)
 ├── 📁 tests/                 # Тесты
 │   ├── conftest.py           # Общие фикстуры
 │   ├── test_client/          # Тесты клиента
 │   └── test_*/               # Тесты других модулей
-├── 📁 chat_manager/          # 🚧 Управление чатами (планируется)
-├── 📁 message_parser/        # 🚧 Парсинг сообщений (планируется)
-├── 📁 utils/                 # 🚧 Утилиты (планируется)
-├── 📄 main.py                # CLI приложение
+├── 📄 install.sh             # curl-инсталлер для систем без Homebrew
 ├── 📄 pyproject.toml         # Poetry конфигурация
 ├── 📄 env.example            # Пример настроек
 └── 📄 .env                   # Ваши настройки (не в git)
@@ -134,28 +135,28 @@ poetry run pre-commit install
 
 ### Проверка подключения
 ```bash
-poetry run python main.py test-connection
+poetry run grappa test-connection
 ```
 
 ### Синхронизация и список чатов
 ```bash
-poetry run python main.py chats sync --limit 0
-poetry run python main.py chats list --limit 10
-poetry run python main.py chats list --archived --limit 10
-poetry run python main.py chats list --exclude-archived --limit 10
-poetry run python main.py chats refresh-archive
-poetry run python main.py chats archive --dry-run <chat_id>
-poetry run python main.py chats archive --yes <chat_id>
-poetry run python main.py chats unarchive --yes <chat_id>
-poetry run python main.py chats search "telegram"
+poetry run grappa chats sync --limit 0
+poetry run grappa chats list --limit 10
+poetry run grappa chats list --archived --limit 10
+poetry run grappa chats list --exclude-archived --limit 10
+poetry run grappa chats refresh-archive
+poetry run grappa chats archive --dry-run <chat_id>
+poetry run grappa chats archive --yes <chat_id>
+poetry run grappa chats unarchive --yes <chat_id>
+poetry run grappa chats search "telegram"
 ```
 
 ### Telegram folders
 ```bash
-poetry run python main.py folders sync
-poetry run python main.py folders list
-poetry run python main.py folders chats WB --limit 20
-poetry run python main.py folders chats 8 --ids-only
+poetry run grappa folders sync
+poetry run grappa folders list
+poetry run grappa folders chats WB --limit 20
+poetry run grappa folders chats 8 --ids-only
 ```
 
 После `folders sync` список чатов также показывает папки, в которых находится чат.
@@ -163,30 +164,30 @@ poetry run python main.py folders chats 8 --ids-only
 ### Скачать сообщения чата
 ```bash
 # последние 100 сообщений
-poetry run python main.py messages download @chat_username --limit 100
+poetry run grappa messages download @chat_username --limit 100
 
 # сообщения за дату/период, с медиа
-poetry run python main.py messages download @chat_username --from 2026-06-01 --to 2026-06-05 --limit 1000 --media
+poetry run grappa messages download @chat_username --from 2026-06-01 --to 2026-06-05 --limit 1000 --media
 
 # весь чат: осторожно, может быть очень долго
-poetry run python main.py messages download @chat_username --limit 0 --media
+poetry run grappa messages download @chat_username --limit 0 --media
 ```
 
 ### Поиск сообщений
 ```bash
 # по локальному кешу во всех скачанных чатах
-poetry run python main.py messages search "важный текст"
+poetry run grappa messages search "важный текст"
 
 # по локальному кешу внутри одного чата
-poetry run python main.py messages search "важный текст" --chat @chat_username
+poetry run grappa messages search "важный текст" --chat @chat_username
 
 # через Telegram API
-poetry run python main.py messages search "важный текст" --chat @chat_username --api
+poetry run grappa messages search "важный текст" --chat @chat_username --api
 ```
 
 ### Отладочный режим
 ```bash
-poetry run python main.py --debug <команда>
+poetry run grappa --debug <команда>
 ```
 
 ## 🧪 Тестирование

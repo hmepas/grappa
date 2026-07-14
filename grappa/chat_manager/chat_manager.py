@@ -6,9 +6,9 @@ from typing import Callable, List, Optional, Union
 from pydantic import BaseModel
 from pyrogram.errors import FloodWait
 
-from client import TelegramClient
-from data.models import ChatInfo, FolderInfo
-from storage.cache_storage import CacheStorage
+from grappa.client import TelegramClient
+from grappa.data.models import ChatInfo, FolderInfo
+from grappa.storage.cache_storage import CacheStorage
 
 
 class ArchiveResult(BaseModel):

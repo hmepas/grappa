@@ -3,11 +3,11 @@
 from datetime import date, datetime, time, timezone
 from typing import List, Optional, Union
 
-from chat_manager import ChatManager
-from client import TelegramClient
-from config import get_settings
-from data.models import MessageInfo
-from storage.cache_storage import CacheStorage
+from grappa.chat_manager import ChatManager
+from grappa.client import TelegramClient
+from grappa.config import get_settings
+from grappa.data.models import MessageInfo
+from grappa.storage.cache_storage import CacheStorage
 
 
 class MessageManager:

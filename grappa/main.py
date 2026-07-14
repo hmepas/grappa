@@ -7,11 +7,11 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from chat_manager import ChatManager
-from client import TelegramClient
-from data.models import ChatInfo, FolderInfo, MessageInfo
-from message_parser import MessageManager, parse_cli_date
-from storage.cache_storage import CacheStorage
+from grappa.chat_manager import ChatManager
+from grappa.client import TelegramClient
+from grappa.data.models import ChatInfo, FolderInfo, MessageInfo
+from grappa.message_parser import MessageManager, parse_cli_date
+from grappa.storage.cache_storage import CacheStorage
 
 console = Console()
 

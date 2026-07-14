@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from client.telegram_client import TelegramClient
-from data.models import UserInfo
+from grappa.client.telegram_client import TelegramClient
+from grappa.data.models import UserInfo
 
 
 class TestTelegramClient:
@@ -14,7 +14,9 @@ class TestTelegramClient:
     @pytest.fixture
     async def client(self, mock_settings):
         """Create a client instance for testing."""
-        with patch("client.telegram_client.get_settings", return_value=mock_settings):
+        with patch(
+            "grappa.client.telegram_client.get_settings", return_value=mock_settings
+        ):
             return TelegramClient()
 
     @pytest.mark.asyncio
@@ -37,7 +39,9 @@ class TestTelegramClient:
 
         mock_pyrogram_client.get_me.return_value = mock_user
 
-        with patch("client.telegram_client.Client", return_value=mock_pyrogram_client):
+        with patch(
+            "grappa.client.telegram_client.Client", return_value=mock_pyrogram_client
+        ):
             await client.connect()
 
             assert client._is_connected is True
@@ -55,7 +59,9 @@ class TestTelegramClient:
 
         mock_pyrogram_client.get_me.return_value = mock_user
 
-        with patch("client.telegram_client.Client", return_value=mock_pyrogram_client):
+        with patch(
+            "grappa.client.telegram_client.Client", return_value=mock_pyrogram_client
+        ):
             await client.connect()
             me = await client.get_me()
 
@@ -77,7 +83,9 @@ class TestTelegramClient:
         mock_user.phone_number = "+1234567890"
         mock_pyrogram_client.get_me.return_value = mock_user
 
-        with patch("client.telegram_client.Client", return_value=mock_pyrogram_client):
+        with patch(
+            "grappa.client.telegram_client.Client", return_value=mock_pyrogram_client
+        ):
             await client.connect()
             await client.disconnect()
 
@@ -95,7 +103,9 @@ class TestTelegramClient:
         mock_user.phone_number = "+1234567890"
         mock_pyrogram_client.get_me.return_value = mock_user
 
-        with patch("client.telegram_client.Client", return_value=mock_pyrogram_client):
+        with patch(
+            "grappa.client.telegram_client.Client", return_value=mock_pyrogram_client
+        ):
             async with client as c:
                 assert c is client
                 assert c._is_connected is True

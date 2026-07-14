@@ -10,8 +10,8 @@ from pyrogram.raw import functions
 from pyrogram.raw import types as raw_types
 from pyrogram.types import Chat, ChatPreview
 
-from config import get_settings
-from data.models import ChatInfo, FolderInfo, MessageInfo, UserInfo
+from grappa.config import get_settings
+from grappa.data.models import ChatInfo, FolderInfo, MessageInfo, UserInfo
 
 
 class TelegramClient:

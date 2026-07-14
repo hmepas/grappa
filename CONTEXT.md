@@ -25,11 +25,12 @@
 ### 🏗️ **Архитектура:**
 ```
 grappa/
-├── client/           # TelegramClient (Pyrogram wrapper)
-├── config/           # Settings с Pydantic Settings
-├── data/            # Модели: UserInfo, ChatInfo, etc.
+├── grappa/          # Python-пакет приложения
+│   ├── client/      # TelegramClient (Pyrogram wrapper)
+│   ├── config/      # Settings с Pydantic Settings
+│   ├── data/        # Модели: UserInfo, ChatInfo, etc.
+│   └── main.py      # CLI с Click + Rich
 ├── tests/           # Полное покрытие тестами
-├── main.py          # CLI с Click + Rich
 └── sessions/        # Telegram сессии
 ```
 
