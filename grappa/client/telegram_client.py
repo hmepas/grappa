@@ -23,6 +23,7 @@ class TelegramClient:
         self.settings = get_settings()
         self._client: Optional[Client] = None
         self._is_connected = False
+        self._me_id: Optional[int] = None
 
     async def connect(self) -> None:
         """Connect to Telegram and authenticate."""
@@ -43,7 +44,9 @@ class TelegramClient:
         try:
             await self._client.start()
             self._is_connected = True
-            print(f"✅ Connected as: {await self.get_me()}")
+            me = await self.get_me()
+            self._me_id = me.id
+            print(f"✅ Connected as: {me}")
 
         except (AuthKeyUnregistered, SessionExpired, SessionRevoked) as e:
             print(f"❌ Session error: {e}")
@@ -311,12 +314,25 @@ class TelegramClient:
         return named
 
     def _convert_chat_to_info(self, chat: Union[Chat, ChatPreview]) -> ChatInfo:
-        """Convert Pyrogram Chat to our ChatInfo model."""
+        """Convert Pyrogram Chat to our ChatInfo model.
+
+        Private chats carry first/last name instead of a title, so a title is
+        built from them; the user's own chat is titled "Saved Messages".
+        """
         chat_obj = cast(Any, chat)
         chat_type = getattr(chat_obj, "type", None)
+        title = getattr(chat_obj, "title", None)
+        if title is None:
+            name_parts = [
+                getattr(chat_obj, "first_name", None),
+                getattr(chat_obj, "last_name", None),
+            ]
+            title = " ".join(part for part in name_parts if part) or None
+        if self._me_id is not None and chat_obj.id == self._me_id:
+            title = "Saved Messages"
         return ChatInfo(
             id=chat_obj.id,
-            title=getattr(chat_obj, "title", None),
+            title=title,
             username=getattr(chat_obj, "username", None),
             type=chat_type.value
             if chat_type is not None and hasattr(chat_type, "value")

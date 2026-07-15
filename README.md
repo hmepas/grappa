@@ -155,6 +155,11 @@ poetry run grappa chats unarchive --yes <chat_id>
 poetry run grappa chats search "telegram"
 ```
 
+Приватные чаты получают имя из first/last name собеседника, а ваш собственный
+чат называется «Saved Messages» (ищется через `chats search saved`; в командах
+сообщений также работает ссылка `me`). Чтобы имена появились в старом кеше,
+перезапустите `chats sync`.
+
 ### Telegram folders
 ```bash
 poetry run grappa folders sync
@@ -182,6 +187,9 @@ poetry run grappa messages download @chat_username --limit 0 --media
 ```bash
 # первый запуск скачивает всю историю (с медиа), повторные - только новые сообщения
 poetry run grappa messages sync @chat_username
+
+# Saved Messages: "me" уходит напрямую в Telegram (InputPeerSelf)
+poetry run grappa messages sync me
 
 # без медиа / в свою директорию для медиа
 poetry run grappa messages sync @chat_username --no-media

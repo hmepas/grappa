@@ -19,6 +19,7 @@ class CacheMetadata(BaseModel):
     version: str = Field(default=CACHE_VERSION)
     last_chats_sync: Optional[datetime] = None
     total_chats: int = 0
+    me_id: Optional[int] = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -60,14 +61,19 @@ class CacheStorage:
         """Return path to one chat message cache file."""
         return self.messages_dir / f"{chat_id}.json"
 
-    async def save_chats(self, chats: List[ChatInfo]) -> None:
-        """Persist chats cache."""
+    async def save_chats(
+        self, chats: List[ChatInfo], me_id: Optional[int] = None
+    ) -> None:
+        """Persist chats cache; keep known me_id when not provided."""
         payload = [chat.model_dump(mode="json") for chat in chats]
         self._write_json(self.chats_file, payload)
+        if me_id is None:
+            me_id = (await self.load_metadata()).me_id
         await self.save_metadata(
             CacheMetadata(
                 last_chats_sync=datetime.now(timezone.utc),
                 total_chats=len(chats),
+                me_id=me_id,
             )
         )
 

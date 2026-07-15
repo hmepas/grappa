@@ -62,13 +62,14 @@ class ChatManager:
         large explicit limit from CLI.
         """
         async with self._client_context() as client:
+            me = await client.get_me()
             folders = await client.get_folders()
             archived_ids = await client.get_archived_chat_ids()
             chats = await client.get_dialogs(limit=limit)
         chats = self._annotate_chats_with_folders(chats, folders)
         chats = self._annotate_chats_with_archived(chats, set(archived_ids))
         await self.storage.save_folders(folders)
-        await self.storage.save_chats(chats)
+        await self.storage.save_chats(chats, me_id=me.id)
         return chats
 
     async def refresh_archived_status(self) -> List[ChatInfo]:
@@ -363,14 +364,24 @@ class ChatManager:
         """Resolve chat reference for Telegram API calls.
 
         Accepts numeric id, @username, username, or a title substring from cache.
+        "me" means Saved Messages: it resolves to the cached own id, or goes to
+        Telegram as-is (InputPeerSelf) when the cache does not know it yet.
+        @username resolves through the cache first so offline commands work too.
         Returns original reference if cache cannot resolve it.
         """
         if isinstance(ref, int):
             return ref
         raw = ref.strip()
+        if raw.lower() in ("me", "@me"):
+            me_id = (await self.storage.load_metadata()).me_id
+            return me_id if me_id is not None else "me"
         if raw.lstrip("-").isdigit():
             return int(raw)
         if raw.startswith("@"):
+            username = raw[1:].lower()
+            for chat in await self.storage.load_chats():
+                if chat.username and chat.username.lower() == username:
+                    return chat.id
             return raw
 
         chats = await self.search_chats(raw, limit=1)

@@ -198,6 +198,39 @@ class TestTelegramClient:
         assert result.exists()
         assert not generated.exists()
 
+    def test_private_chat_title_built_from_name(self, client):
+        """Private chat title is assembled from first and last name."""
+        chat = SimpleNamespace(
+            id=555,
+            title=None,
+            username="vasya",
+            type=SimpleNamespace(value="private"),
+            first_name="Vasya",
+            last_name="Pupkin",
+        )
+
+        info = client._convert_chat_to_info(chat)
+
+        assert info.title == "Vasya Pupkin"
+        assert info.username == "vasya"
+
+    def test_own_chat_titled_saved_messages(self, client):
+        """The user's own chat gets the Saved Messages title."""
+        client._me_id = 555
+        chat = SimpleNamespace(
+            id=555,
+            title=None,
+            username="hmepas",
+            type=SimpleNamespace(value="private"),
+            first_name="Pavel",
+            last_name=None,
+        )
+
+        info = client._convert_chat_to_info(chat)
+
+        assert info.title == "Saved Messages"
+        assert info.username == "hmepas"
+
     @pytest.mark.asyncio
     async def test_operations_without_connection(self, client):
         """Test that operations fail when not connected."""
