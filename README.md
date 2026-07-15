@@ -107,8 +107,10 @@ curl -fsSL https://raw.githubusercontent.com/hmepas/grappa/main/install.sh | bas
 При первом запуске grappa сам запросит Telegram API-ключи и сохранит их в
 `~/.config/grappa/config.env` (уважается `XDG_CONFIG_HOME`). Приоритет
 настроек: переменные окружения > `./.env` в текущей директории > глобальный
-конфиг. Рабочие файлы (`sessions/`, `data/`, `downloads/`) создаются в текущей
-директории, поэтому запускайте grappa из выделенной папки.
+конфиг. Рабочие файлы хранятся в `~/.grappa/data/` (кеш чатов и сообщений,
+`downloads/` для медиа, `sessions/` для сессии Telegram) независимо от того,
+откуда запущена grappa; пути переопределяются через `GRAPPA_DATA_DIR`,
+`GRAPPA_DOWNLOADS_DIR` и `GRAPPA_SESSION_DIR`.
 
 ## 🛠️ Установка для разработки
 
@@ -199,8 +201,8 @@ poetry run grappa messages sync @chat_username --media-dir ~/tg-archive/mychat
 poetry run grappa messages list @chat_username --text --limit 0
 ```
 
-Сообщения хранятся в `data/messages/<chat_id>.json`, медиа - в
-`downloads/<chat_id>/<message_id>_<имя_файла>` (гифки, фото, видео, голосовые,
+Сообщения хранятся в `~/.grappa/data/messages/<chat_id>.json`, медиа - в
+`~/.grappa/data/downloads/<chat_id>/<message_id>_<имя_файла>` (гифки, фото, видео, голосовые,
 кружки, стикеры, аудио и документы). Синк движется только вперёд: правки и
 удаления сообщений старше последнего закешированного не отслеживаются.
 

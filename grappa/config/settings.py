@@ -5,13 +5,17 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 CONFIG_DIR = (
     Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "grappa"
 )
 GLOBAL_ENV_FILE = CONFIG_DIR / "config.env"
+
+# Default home for all working data; grappa is an installed app, so data must
+# not depend on the current working directory unless overridden via GRAPPA_*.
+GRAPPA_HOME = Path.home() / ".grappa"
 
 # Local ./.env takes priority over the global config file (later files win)
 _ENV_FILES = (str(GLOBAL_ENV_FILE), ".env")
@@ -41,13 +45,22 @@ class AppSettings(BaseSettings):
     log_file: Optional[str] = Field(default=None, description="Log file path")
 
     # Session and data directories
-    data_dir: Path = Field(default=Path.cwd() / "data", description="Data directory")
+    data_dir: Path = Field(default=GRAPPA_HOME / "data", description="Data directory")
     session_dir: Path = Field(
-        default=Path.cwd() / "sessions", description="Session directory"
+        default=GRAPPA_HOME / "data" / "sessions", description="Session directory"
     )
     downloads_dir: Path = Field(
-        default=Path.cwd() / "downloads", description="Downloaded media directory"
+        default=GRAPPA_HOME / "data" / "downloads",
+        description="Downloaded media directory",
     )
+
+    @field_validator("data_dir", "session_dir", "downloads_dir", mode="before")
+    @classmethod
+    def _expand_user(cls, value: object) -> object:
+        """Expand ~ in directory paths coming from env/config files."""
+        if isinstance(value, str):
+            return Path(value).expanduser()
+        return value
 
     # Message processing settings
     max_messages_per_chat: int = Field(
@@ -81,9 +94,9 @@ class Settings(BaseSettings):
         """Initialize settings and create necessary directories."""
         super().__init__(**kwargs)  # type: ignore[arg-type]
         # Ensure directories exist
-        self.app.data_dir.mkdir(exist_ok=True)
-        self.app.session_dir.mkdir(exist_ok=True)
-        self.app.downloads_dir.mkdir(exist_ok=True)
+        self.app.data_dir.mkdir(parents=True, exist_ok=True)
+        self.app.session_dir.mkdir(parents=True, exist_ok=True)
+        self.app.downloads_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache
