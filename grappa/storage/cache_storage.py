@@ -106,6 +106,15 @@ class CacheStorage:
         """Merge and persist messages for a chat."""
         existing = {m.id: m for m in await self.load_messages(chat_id)}
         for message in messages:
+            cached = existing.get(message.id)
+            if (
+                cached
+                and cached.downloaded_media_path
+                and not message.downloaded_media_path
+            ):
+                message = message.model_copy(
+                    update={"downloaded_media_path": cached.downloaded_media_path}
+                )
             existing[message.id] = message
         ordered = sorted(existing.values(), key=lambda m: (m.date, m.id))
         payload = [message.model_dump(mode="json") for message in ordered]

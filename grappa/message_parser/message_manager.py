@@ -1,6 +1,7 @@
 """Message download and search service."""
 
 from datetime import date, datetime, time, timezone
+from pathlib import Path
 from typing import List, Optional, Union
 
 from grappa.chat_manager import ChatManager
@@ -32,6 +33,7 @@ class MessageManager:
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         include_media: bool = False,
+        media_dir: Optional[Path] = None,
     ) -> List[MessageInfo]:
         """Download chat messages, cache them and optionally download media."""
         resolved = await self.chat_manager.resolve_chat(chat_ref)
@@ -43,10 +45,43 @@ class MessageManager:
             )
             messages = self._filter_by_date(messages, from_date, to_date)
             if include_media:
-                messages = await self._download_media(client, messages)
+                messages = await self._download_media(client, messages, media_dir)
 
         if messages:
             await self.storage.save_messages(messages[0].chat_id, messages)
+        return messages
+
+    async def sync_chat(
+        self,
+        chat_ref: Union[int, str],
+        include_media: bool = True,
+        media_dir: Optional[Path] = None,
+        limit: int = 0,
+    ) -> List[MessageInfo]:
+        """Fetch only messages newer than the local cache and merge them in.
+
+        On first run (empty cache) this downloads the whole chat history.
+        Edited/deleted messages older than the last cached one are not
+        refreshed - the sync only moves forward.
+        """
+        resolved = await self.chat_manager.resolve_chat(chat_ref)
+        async with self._client_context() as client:
+            if not isinstance(resolved, int):
+                chat_info = await client.get_chat_info(resolved)
+                resolved = chat_info.id
+
+            cached = await self.storage.load_messages(resolved)
+            last_cached_id = max((m.id for m in cached), default=None)
+            messages = await client.get_chat_messages(
+                chat_id=resolved,
+                limit=limit,
+                stop_before_id=last_cached_id,
+            )
+            if include_media:
+                messages = await self._download_media(client, messages, media_dir)
+
+        if messages:
+            await self.storage.save_messages(resolved, messages)
         return messages
 
     async def search_cached_messages(
@@ -101,14 +136,22 @@ class MessageManager:
         return messages
 
     async def _download_media(
-        self, client: TelegramClient, messages: List[MessageInfo]
+        self,
+        client: TelegramClient,
+        messages: List[MessageInfo],
+        media_dir: Optional[Path] = None,
     ) -> List[MessageInfo]:
         updated: List[MessageInfo] = []
         for message in messages:
             if not message.media_type:
                 updated.append(message)
                 continue
-            output_dir = self.settings.app.downloads_dir / str(message.chat_id)
+            if message.downloaded_media_path and message.downloaded_media_path.exists():
+                updated.append(message)
+                continue
+            output_dir = media_dir or (
+                self.settings.app.downloads_dir / str(message.chat_id)
+            )
             path = await client.download_message_media(message, output_dir)
             if path:
                 message = message.model_copy(update={"downloaded_media_path": path})

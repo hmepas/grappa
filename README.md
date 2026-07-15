@@ -29,6 +29,8 @@
 - `poetry run grappa chats list --limit N` - список чатов из кеша
 - `poetry run grappa chats search "query"` - поиск чатов по кешу
 - `poetry run grappa messages download <chat> --limit N --media` - скачать сообщения и медиа
+- `poetry run grappa messages sync <chat>` - докачать только новые сообщения (дельта) с медиа
+- `poetry run grappa messages list <chat> [--text]` - показать локальную копию чата
 - `poetry run grappa messages search "query" [--chat <chat>] [--api]` - поиск сообщений
 - `poetry run grappa folders sync` - синхронизировать Telegram folders
 - `poetry run grappa folders list` - список folders
@@ -174,6 +176,25 @@ poetry run grappa messages download @chat_username --from 2026-06-01 --to 2026-0
 # весь чат: осторожно, может быть очень долго
 poetry run grappa messages download @chat_username --limit 0 --media
 ```
+
+### Поддержание локальной копии чата (дельта-синк)
+
+```bash
+# первый запуск скачивает всю историю (с медиа), повторные - только новые сообщения
+poetry run grappa messages sync @chat_username
+
+# без медиа / в свою директорию для медиа
+poetry run grappa messages sync @chat_username --no-media
+poetry run grappa messages sync @chat_username --media-dir ~/tg-archive/mychat
+
+# посмотреть локальную копию текстом со путями к медиа-файлам
+poetry run grappa messages list @chat_username --text --limit 0
+```
+
+Сообщения хранятся в `data/messages/<chat_id>.json`, медиа - в
+`downloads/<chat_id>/<message_id>_<имя_файла>` (гифки, фото, видео, голосовые,
+кружки, стикеры, аудио и документы). Синк движется только вперёд: правки и
+удаления сообщений старше последнего закешированного не отслеживаются.
 
 ### Поиск сообщений
 ```bash

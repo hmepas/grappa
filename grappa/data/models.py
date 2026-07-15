@@ -118,6 +118,9 @@ class MessageInfo(BaseModel):
     media_file_id: Optional[str] = Field(
         default=None, description="Telegram media file id"
     )
+    media_file_name: Optional[str] = Field(
+        default=None, description="Original media file name from Telegram"
+    )
     downloaded_media_path: Optional[Path] = Field(
         default=None, description="Local downloaded media path"
     )

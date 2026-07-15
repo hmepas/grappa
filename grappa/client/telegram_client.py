@@ -1,5 +1,6 @@
 """Main Telegram client implementation."""
 
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional, Union, cast
@@ -204,8 +205,14 @@ class TelegramClient:
         chat_id: Union[int, str],
         limit: int = 100,
         offset_date: Optional[datetime] = None,
+        stop_before_id: Optional[int] = None,
     ) -> List[MessageInfo]:
-        """Get recent chat messages."""
+        """Get recent chat messages.
+
+        History is iterated from newest to oldest; when `stop_before_id` is set,
+        iteration stops at the first message with id <= stop_before_id, so only
+        the delta above already-known messages is fetched from Telegram.
+        """
         if not self._client or not self._is_connected:
             raise RuntimeError("Client not connected")
 
@@ -216,6 +223,8 @@ class TelegramClient:
 
         messages: List[MessageInfo] = []
         async for message in client.get_chat_history(**kwargs):
+            if stop_before_id is not None and getattr(message, "id") <= stop_before_id:
+                break
             messages.append(self._convert_message_to_info(message))
         return messages
 
@@ -270,7 +279,12 @@ class TelegramClient:
     async def download_message_media(
         self, message: MessageInfo, output_dir: Path
     ) -> Optional[Path]:
-        """Download media for a message, if it has media."""
+        """Download media for a message, if it has media.
+
+        Files are stored as `<message_id>_<original_name>`; when Telegram gives
+        no original name, Pyrogram generates one with a proper extension and it
+        is renamed to carry the message id prefix.
+        """
         if not self._client or not self._is_connected:
             raise RuntimeError("Client not connected")
         if not message.media_type or not message.media_file_id:
@@ -278,11 +292,23 @@ class TelegramClient:
 
         output_dir.mkdir(parents=True, exist_ok=True)
         client = cast(Any, self._client)
+        if message.media_file_name:
+            target = output_dir / f"{message.id}_{message.media_file_name}"
+            result = await client.download_media(
+                message=message.media_file_id, file_name=str(target)
+            )
+            return Path(str(result)) if result else None
+
+        # Directory mode: Pyrogram picks a file name with a guessed extension.
         result = await client.download_media(
-            message=message.media_file_id,
-            file_name=str(output_dir / f"{message.chat_id}_{message.id}_"),
+            message=message.media_file_id, file_name=f"{output_dir}{os.sep}"
         )
-        return Path(str(result)) if result else None
+        if not result:
+            return None
+        downloaded = Path(str(result))
+        named = downloaded.with_name(f"{message.id}_{downloaded.name}")
+        downloaded.rename(named)
+        return named
 
     def _convert_chat_to_info(self, chat: Union[Chat, ChatPreview]) -> ChatInfo:
         """Convert Pyrogram Chat to our ChatInfo model."""
@@ -348,6 +374,7 @@ class TelegramClient:
         )
         text = getattr(message, "text", None) or getattr(message, "caption", None)
         reply_to = getattr(message, "reply_to_message", None)
+        media_obj = getattr(message, media_type, None) if media_type else None
 
         return MessageInfo(
             id=getattr(message, "id"),
@@ -357,7 +384,8 @@ class TelegramClient:
             date=getattr(message, "date"),
             reply_to_message_id=getattr(reply_to, "id", None),
             media_type=media_type,
-            media_file_id=self._extract_media_file_id(message, media_type),
+            media_file_id=getattr(media_obj, "file_id", None),
+            media_file_name=getattr(media_obj, "file_name", None),
         )
 
     def _input_peer_to_chat_id(self, peer: object) -> Optional[int]:
@@ -376,15 +404,6 @@ class TelegramClient:
         if channel_id is not None:
             return int(f"-100{channel_id}")
         return None
-
-    def _extract_media_file_id(
-        self, message: object, media_type: Optional[str]
-    ) -> Optional[str]:
-        """Extract file_id for known media types."""
-        if not media_type:
-            return None
-        media_obj = getattr(message, media_type, None)
-        return getattr(media_obj, "file_id", None)
 
     async def _handle_session_error(self) -> None:
         """Handle session-related errors."""

@@ -512,12 +512,19 @@ def messages() -> None:
     "--to", "to_date", default=None, help="End date: YYYY-MM-DD or ISO datetime"
 )
 @click.option("--media", is_flag=True, help="Download media files too")
+@click.option(
+    "--media-dir",
+    default=None,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Directory for media files; default is downloads/<chat_id>/",
+)
 async def messages_download(
     chat: str,
     limit: int,
     from_date: Optional[str],
     to_date: Optional[str],
     media: bool,
+    media_dir: Optional[Path],
 ) -> None:
     """Download selected chat messages into local cache."""
     try:
@@ -529,6 +536,7 @@ async def messages_download(
             from_date=parse_cli_date(from_date),
             to_date=parse_cli_date(to_date, end_of_day=True),
             include_media=media,
+            media_dir=media_dir,
         )
         console.print(
             f"✅ Downloaded/cached {len(messages_result)} messages", style="green"
@@ -536,6 +544,48 @@ async def messages_download(
         _print_messages(messages_result[:20], title="Downloaded messages preview")
         if len(messages_result) > 20:
             console.print(f"... and {len(messages_result) - 20} more", style="dim")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@messages.command("sync")
+@click.argument("chat")
+@click.option(
+    "--media/--no-media",
+    default=True,
+    show_default=True,
+    help="Download media files for new messages",
+)
+@click.option(
+    "--media-dir",
+    default=None,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Directory for media files; default is downloads/<chat_id>/",
+)
+@click.option(
+    "--limit",
+    default=0,
+    help="Safety cap on fetched messages; 0 means no cap",
+)
+async def messages_sync(
+    chat: str, media: bool, media_dir: Optional[Path], limit: int
+) -> None:
+    """Fetch only new messages since the last sync and merge into local cache.
+
+    First run downloads the whole chat history; subsequent runs download only
+    the delta above the newest cached message.
+    """
+    try:
+        manager = MessageManager()
+        console.print("⏳ Syncing new messages...", style="yellow")
+        new_messages = await manager.sync_chat(
+            chat_ref=chat,
+            include_media=media,
+            media_dir=media_dir,
+            limit=limit,
+        )
+        console.print(f"✅ Synced {len(new_messages)} new messages", style="green")
+        _print_messages_text(sorted(new_messages, key=lambda m: (m.date, m.id)))
     except Exception as e:
         console.print(f"❌ Error: {e}", style="red")
 
@@ -572,7 +622,13 @@ async def messages_search(
 @messages.command("list")
 @click.argument("chat")
 @click.option("--limit", default=50, help="Limit cached messages to show")
-async def messages_list(chat: str, limit: int) -> None:
+@click.option(
+    "--text",
+    "as_text",
+    is_flag=True,
+    help="Print plain text with local media file paths instead of a table",
+)
+async def messages_list(chat: str, limit: int, as_text: bool) -> None:
     """List cached messages for one chat."""
     try:
         storage = CacheStorage()
@@ -583,7 +639,11 @@ async def messages_list(chat: str, limit: int) -> None:
             )
             return
         messages_result = await storage.load_messages(chat_ref)
-        _print_messages(messages_result[-limit:], title=f"Cached messages: {chat}")
+        shown = messages_result[-limit:] if limit > 0 else messages_result
+        if as_text:
+            _print_messages_text(shown)
+            return
+        _print_messages(shown, title=f"Cached messages: {chat}")
     except Exception as e:
         console.print(f"❌ Error: {e}", style="red")
 
@@ -844,6 +904,30 @@ def _print_messages(messages_result: Iterable[MessageInfo], title: str) -> None:
             text,
         )
     console.print(table)
+
+
+def _print_messages_text(messages_result: Iterable[MessageInfo]) -> None:
+    """Print messages as plain text with local media file paths."""
+    printed = False
+    for message in messages_result:
+        printed = True
+        header = (
+            f"[{message.date.isoformat(sep=' ', timespec='seconds')}] #{message.id}"
+        )
+        if message.from_user_id is not None:
+            header += f" from={message.from_user_id}"
+        if message.reply_to_message_id is not None:
+            header += f" reply_to={message.reply_to_message_id}"
+        click.echo(header)
+        if message.text:
+            click.echo(message.text)
+        if message.downloaded_media_path:
+            click.echo(f"media: {message.downloaded_media_path}")
+        elif message.media_type:
+            click.echo(f"media: <{message.media_type}: not downloaded>")
+        click.echo("")
+    if not printed:
+        console.print("No messages found", style="yellow")
 
 
 def main() -> None:
