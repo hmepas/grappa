@@ -82,7 +82,7 @@ def _ensure_configured() -> None:
 @click.group()
 @click.option("--debug", is_flag=True, help="Enable debug mode")
 def cli(debug: bool) -> None:
-    """Grappa - AI-augmented Telegram client."""
+    """Grappa - Telegram client CLI."""
     if debug:
         console.print("🐛 Debug mode enabled", style="yellow")
     _ensure_configured()
