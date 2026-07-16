@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "grappa"
-version = "0.1.4"
+version = "0.2.0"
 description = "Telegram client CLI"
 authors = ["Pavel Khmelinsky <hmepas@gmail.com>"]
 readme = "README.md"
