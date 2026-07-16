@@ -111,27 +111,53 @@ class TelegramClient:
             )
 
     async def get_archived_chat_ids(self, limit: int = 0) -> List[int]:
-        """Get chat ids from Telegram archive folder."""
+        """Get chat ids from Telegram archive folder.
+
+        The server caps GetDialogs at ~100 dialogs per request regardless of
+        the requested limit, so pages are fetched until a short page arrives.
+        """
         if not self._client or not self._is_connected:
             raise RuntimeError("Client not connected")
 
         client = cast(Any, self._client)
-        result = await client.invoke(
-            functions.messages.GetDialogs(
-                offset_date=0,
-                offset_id=0,
-                offset_peer=raw_types.InputPeerEmpty(),
-                limit=limit or 10000,
-                hash=0,
-                folder_id=1,
+        page_size = 100
+        offset_date = 0
+        offset_id = 0
+        offset_peer: Any = raw_types.InputPeerEmpty()
+        archived_ids: List[int] = []
+        while True:
+            result = await client.invoke(
+                functions.messages.GetDialogs(
+                    offset_date=offset_date,
+                    offset_id=offset_id,
+                    offset_peer=offset_peer,
+                    limit=page_size,
+                    hash=0,
+                    folder_id=1,
+                )
             )
-        )
-        archived_ids = []
-        for dialog in getattr(result, "dialogs", []) or []:
-            chat_id = self._peer_to_chat_id(getattr(dialog, "peer", None))
-            if chat_id is not None:
-                archived_ids.append(chat_id)
-        return list(dict.fromkeys(archived_ids))
+            dialogs = list(getattr(result, "dialogs", []) or [])
+            for dialog in dialogs:
+                chat_id = self._peer_to_chat_id(getattr(dialog, "peer", None))
+                if chat_id is not None:
+                    archived_ids.append(chat_id)
+
+            if len(dialogs) < page_size:
+                break
+            if limit and len(archived_ids) >= limit:
+                break
+
+            last_dialog = dialogs[-1]
+            last_chat_id = self._peer_to_chat_id(getattr(last_dialog, "peer", None))
+            last_message = self._find_dialog_top_message(result, last_dialog)
+            if last_chat_id is None or last_message is None:
+                break
+            offset_date = getattr(last_message, "date", 0) or 0
+            offset_id = getattr(last_message, "id", 0) or 0
+            offset_peer = await client.resolve_peer(last_chat_id)
+
+        unique_ids = list(dict.fromkeys(archived_ids))
+        return unique_ids[:limit] if limit else unique_ids
 
     async def get_folders(self) -> List[FolderInfo]:
         """Get Telegram dialog folders/filters."""
@@ -450,6 +476,21 @@ class TelegramClient:
             media_file_id=getattr(media_obj, "file_id", None),
             media_file_name=getattr(media_obj, "file_name", None),
         )
+
+    def _find_dialog_top_message(
+        self, result: object, dialog: object
+    ) -> Optional[object]:
+        """Find the message referenced by dialog.top_message in a GetDialogs result."""
+        top_message_id = getattr(dialog, "top_message", None)
+        dialog_chat_id = self._peer_to_chat_id(getattr(dialog, "peer", None))
+        for message in getattr(result, "messages", []) or []:
+            if (
+                getattr(message, "id", None) == top_message_id
+                and self._peer_to_chat_id(getattr(message, "peer_id", None))
+                == dialog_chat_id
+            ):
+                return message
+        return None
 
     def _input_peer_to_chat_id(self, peer: object) -> Optional[int]:
         """Convert raw InputPeer to Pyrogram-style chat id."""

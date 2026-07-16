@@ -33,6 +33,10 @@ class DeleteAndLeaveResult(BaseModel):
 class ChatManager:
     """High-level chat management API used by CLI/WebUI/TUI."""
 
+    # folders.EditPeerFolders rate limit counts requests, not peers, so
+    # archiving is sent in batches of up to 100 peers per request.
+    ARCHIVE_BATCH_SIZE = 100
+
     def __init__(
         self,
         storage: Optional[CacheStorage] = None,
@@ -158,38 +162,69 @@ class ChatManager:
         return [chat for _, chat in scored[:limit]]
 
     async def set_chats_archived(
-        self, chat_refs: List[Union[int, str]], archived: bool
+        self,
+        chat_refs: List[Union[int, str]],
+        archived: bool,
+        wait_on_flood: bool = True,
+        max_flood_wait_seconds: int = 900,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> List[ArchiveResult]:
-        """Archive or unarchive multiple chats and update local cache."""
+        """Archive or unarchive multiple chats and update local cache.
+
+        Chats are sent in batches of up to ARCHIVE_BATCH_SIZE peers per API
+        request. A batch that fails with a non-flood error falls back to
+        per-chat calls to keep per-chat error reporting; an unwaitable
+        FloodWait fails the whole batch at once instead of retrying each chat
+        during the ban.
+        """
         resolved_refs = [await self.resolve_chat(chat_ref) for chat_ref in chat_refs]
+        pairs = list(zip(chat_refs, resolved_refs))
         results: List[ArchiveResult] = []
         successful_ids: set[int] = set()
 
         async with self._client_context() as client:
-            for chat_ref, resolved in zip(chat_refs, resolved_refs):
+            for start in range(0, len(pairs), self.ARCHIVE_BATCH_SIZE):
+                batch = pairs[start : start + self.ARCHIVE_BATCH_SIZE]
                 try:
-                    await client.set_chats_archived([resolved], archived=archived)
-                    resolved_id = resolved if isinstance(resolved, int) else None
-                    if resolved_id is not None:
-                        successful_ids.add(resolved_id)
-                    results.append(
-                        ArchiveResult(
-                            chat_ref=str(chat_ref),
-                            resolved_chat_id=resolved_id,
-                            success=True,
-                        )
+                    await self._set_archived_waiting_flood(
+                        client,
+                        [resolved for _, resolved in batch],
+                        archived,
+                        wait_on_flood,
+                        max_flood_wait_seconds,
+                        progress_callback,
                     )
-                except Exception as exc:
-                    results.append(
-                        ArchiveResult(
-                            chat_ref=str(chat_ref),
-                            resolved_chat_id=resolved
-                            if isinstance(resolved, int)
-                            else None,
-                            success=False,
-                            error=str(exc),
+                except FloodWait as exc:
+                    for chat_ref, resolved in batch:
+                        results.append(
+                            self._archive_failure(chat_ref, resolved, str(exc))
                         )
-                    )
+                except Exception:
+                    for chat_ref, resolved in batch:
+                        try:
+                            await self._set_archived_waiting_flood(
+                                client,
+                                [resolved],
+                                archived,
+                                wait_on_flood,
+                                max_flood_wait_seconds,
+                                progress_callback,
+                            )
+                        except Exception as exc:
+                            results.append(
+                                self._archive_failure(chat_ref, resolved, str(exc))
+                            )
+                        else:
+                            results.append(
+                                self._archive_success(
+                                    chat_ref, resolved, successful_ids
+                                )
+                            )
+                else:
+                    for chat_ref, resolved in batch:
+                        results.append(
+                            self._archive_success(chat_ref, resolved, successful_ids)
+                        )
 
         if successful_ids:
             chats = await self.storage.load_chats()
@@ -202,6 +237,56 @@ class ChatManager:
                 ]
             )
         return results
+
+    async def _set_archived_waiting_flood(
+        self,
+        client: TelegramClient,
+        chat_ids: List[Union[int, str]],
+        archived: bool,
+        wait_on_flood: bool,
+        max_flood_wait_seconds: int,
+        progress_callback: Optional[Callable[[str], None]],
+    ) -> None:
+        """Archive chats, sleeping and retrying on waitable FloodWait errors."""
+        while True:
+            try:
+                await client.set_chats_archived(chat_ids, archived=archived)
+                return
+            except FloodWait as exc:
+                wait_seconds = int(exc.value)
+                if not wait_on_flood or wait_seconds > max_flood_wait_seconds:
+                    raise
+                self._report_progress(
+                    progress_callback,
+                    f"Telegram requested FLOOD_WAIT {wait_seconds}s; "
+                    "sleeping and retrying...",
+                )
+                await asyncio.sleep(wait_seconds + 1)
+
+    def _archive_success(
+        self,
+        chat_ref: Union[int, str],
+        resolved: Union[int, str],
+        successful_ids: set[int],
+    ) -> ArchiveResult:
+        """Build a success result and record the resolved id for cache update."""
+        resolved_id = resolved if isinstance(resolved, int) else None
+        if resolved_id is not None:
+            successful_ids.add(resolved_id)
+        return ArchiveResult(
+            chat_ref=str(chat_ref), resolved_chat_id=resolved_id, success=True
+        )
+
+    def _archive_failure(
+        self, chat_ref: Union[int, str], resolved: Union[int, str], error: str
+    ) -> ArchiveResult:
+        """Build a failure result for one chat."""
+        return ArchiveResult(
+            chat_ref=str(chat_ref),
+            resolved_chat_id=resolved if isinstance(resolved, int) else None,
+            success=False,
+            error=error,
+        )
 
     async def delete_and_leave_chats(
         self,

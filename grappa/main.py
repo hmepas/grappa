@@ -305,19 +305,69 @@ async def chats_search(query: str, limit: int, plain: bool, ids_only: bool) -> N
 @click.argument("chat_ids", nargs=-1, required=True, type=str)
 @click.option("--yes", is_flag=True, help="Confirm archive operation")
 @click.option("--dry-run", is_flag=True, help="Only show what would be archived")
-async def chats_archive(chat_ids: tuple[str, ...], yes: bool, dry_run: bool) -> None:
+@click.option(
+    "--wait-flood/--no-wait-flood",
+    default=True,
+    show_default=True,
+    help="Sleep and retry when Telegram returns FLOOD_WAIT",
+)
+@click.option(
+    "--max-flood-wait",
+    default=900,
+    show_default=True,
+    type=int,
+    help="Maximum FLOOD_WAIT seconds to auto-sleep before treating it as error",
+)
+async def chats_archive(
+    chat_ids: tuple[str, ...],
+    yes: bool,
+    dry_run: bool,
+    wait_flood: bool,
+    max_flood_wait: int,
+) -> None:
     """Move chats to Telegram archive by chat ids."""
-    await _set_chats_archived_command(chat_ids, archived=True, yes=yes, dry_run=dry_run)
+    await _set_chats_archived_command(
+        chat_ids,
+        archived=True,
+        yes=yes,
+        dry_run=dry_run,
+        wait_flood=wait_flood,
+        max_flood_wait=max_flood_wait,
+    )
 
 
 @chats.command("unarchive", context_settings={"ignore_unknown_options": True})
 @click.argument("chat_ids", nargs=-1, required=True, type=str)
 @click.option("--yes", is_flag=True, help="Confirm unarchive operation")
 @click.option("--dry-run", is_flag=True, help="Only show what would be unarchived")
-async def chats_unarchive(chat_ids: tuple[str, ...], yes: bool, dry_run: bool) -> None:
+@click.option(
+    "--wait-flood/--no-wait-flood",
+    default=True,
+    show_default=True,
+    help="Sleep and retry when Telegram returns FLOOD_WAIT",
+)
+@click.option(
+    "--max-flood-wait",
+    default=900,
+    show_default=True,
+    type=int,
+    help="Maximum FLOOD_WAIT seconds to auto-sleep before treating it as error",
+)
+async def chats_unarchive(
+    chat_ids: tuple[str, ...],
+    yes: bool,
+    dry_run: bool,
+    wait_flood: bool,
+    max_flood_wait: int,
+) -> None:
     """Move chats out of Telegram archive by chat ids."""
     await _set_chats_archived_command(
-        chat_ids, archived=False, yes=yes, dry_run=dry_run
+        chat_ids,
+        archived=False,
+        yes=yes,
+        dry_run=dry_run,
+        wait_flood=wait_flood,
+        max_flood_wait=max_flood_wait,
     )
 
 
@@ -697,7 +747,12 @@ async def messages_list(chat: str, limit: int, as_text: bool) -> None:
 
 
 async def _set_chats_archived_command(
-    chat_ids: tuple[str, ...], archived: bool, yes: bool, dry_run: bool
+    chat_ids: tuple[str, ...],
+    archived: bool,
+    yes: bool,
+    dry_run: bool,
+    wait_flood: bool = True,
+    max_flood_wait: int = 900,
 ) -> None:
     """Shared CLI implementation for archive/unarchive commands."""
     action = "archive" if archived else "unarchive"
@@ -726,7 +781,13 @@ async def _set_chats_archived_command(
                 f"This changes Telegram folders. Re-run with --yes to {action}"
             )
 
-        results = await manager.set_chats_archived(list(chat_ids), archived=archived)
+        results = await manager.set_chats_archived(
+            list(chat_ids),
+            archived=archived,
+            wait_on_flood=wait_flood,
+            max_flood_wait_seconds=max_flood_wait,
+            progress_callback=lambda message: console.print(message, style="yellow"),
+        )
         for result in results:
             if result.success:
                 console.print(f"✅ {result.chat_ref}: {action}d", style="green")

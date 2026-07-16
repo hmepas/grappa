@@ -10,6 +10,23 @@ from grappa.client.telegram_client import TelegramClient
 from grappa.data.models import MessageInfo, UserInfo
 
 
+def make_dialogs_page(user_ids: list[int]) -> SimpleNamespace:
+    """Build a GetDialogs-like result page for private-chat dialogs."""
+    dialogs = [
+        SimpleNamespace(peer=SimpleNamespace(user_id=user_id), top_message=user_id * 10)
+        for user_id in user_ids
+    ]
+    messages = [
+        SimpleNamespace(
+            id=user_id * 10,
+            date=1_700_000_000 + user_id,
+            peer_id=SimpleNamespace(user_id=user_id),
+        )
+        for user_id in user_ids
+    ]
+    return SimpleNamespace(dialogs=dialogs, messages=messages)
+
+
 def make_raw_message(message_id: int) -> SimpleNamespace:
     """Build a minimal Pyrogram-like message object."""
     return SimpleNamespace(
@@ -152,6 +169,40 @@ class TestTelegramClient:
 
         assert [m.id for m in messages] == [5, 4]
         assert consumed == [5, 4, 3]
+
+    @pytest.mark.asyncio
+    async def test_get_archived_chat_ids_paginates(self, client):
+        """Archive listing keeps requesting pages until a short page arrives."""
+        page1 = make_dialogs_page(list(range(1, 101)))
+        page2 = make_dialogs_page(list(range(101, 106)))
+        offset_peer = SimpleNamespace(user_id=100)
+
+        client._client = MagicMock()
+        client._client.invoke = AsyncMock(side_effect=[page1, page2])
+        client._client.resolve_peer = AsyncMock(return_value=offset_peer)
+        client._is_connected = True
+
+        archived_ids = await client.get_archived_chat_ids()
+
+        assert archived_ids == list(range(1, 106))
+        assert client._client.invoke.await_count == 2
+        second_request = client._client.invoke.await_args_list[1].args[0]
+        assert second_request.offset_id == 100 * 10
+        assert second_request.offset_date == 1_700_000_000 + 100
+        assert second_request.offset_peer is offset_peer
+        client._client.resolve_peer.assert_awaited_once_with(100)
+
+    @pytest.mark.asyncio
+    async def test_get_archived_chat_ids_single_short_page(self, client):
+        """A page shorter than the page size stops pagination immediately."""
+        client._client = MagicMock()
+        client._client.invoke = AsyncMock(return_value=make_dialogs_page([7, 8, 9]))
+        client._is_connected = True
+
+        archived_ids = await client.get_archived_chat_ids()
+
+        assert archived_ids == [7, 8, 9]
+        assert client._client.invoke.await_count == 1
 
     @pytest.mark.asyncio
     async def test_download_media_uses_original_file_name(self, client, tmp_path):
