@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Any, List, Optional, Union, cast
 
 from pyrogram import Client
+from pyrogram.enums import ParseMode
 from pyrogram.errors import AuthKeyUnregistered, SessionExpired, SessionRevoked
 from pyrogram.raw import functions
 from pyrogram.raw import types as raw_types
-from pyrogram.types import Chat, ChatPreview
+from pyrogram.types import Chat
 
 from grappa.config import get_settings
 from grappa.data.models import ChatInfo, FolderInfo, MessageInfo, UserInfo
@@ -138,11 +139,15 @@ class TelegramClient:
             raise RuntimeError("Client not connected")
 
         client = cast(Any, self._client)
-        raw_filters = await client.invoke(functions.messages.GetDialogFilters())
+        raw_result = await client.invoke(functions.messages.GetDialogFilters())
+        # Newer layers wrap filters in messages.DialogFilters
+        raw_filters = getattr(raw_result, "filters", raw_result)
         folders: List[FolderInfo] = []
         for raw_filter in raw_filters:
             folder_id = getattr(raw_filter, "id", None)
             title = getattr(raw_filter, "title", None)
+            # Newer layers use TextWithEntities for folder titles
+            title = getattr(title, "text", title)
             if folder_id is None or title is None:
                 continue
 
@@ -279,6 +284,48 @@ class TelegramClient:
 
         await client.leave_chat(chat_id=chat_id, delete=True)
 
+    async def send_message(
+        self,
+        chat_id: Union[int, str],
+        text: str,
+        reply_to_message_id: Optional[int] = None,
+        disable_markup: bool = False,
+    ) -> MessageInfo:
+        """Send a text message; text may contain Pyrogram Markdown/HTML markup."""
+        if not self._client or not self._is_connected:
+            raise RuntimeError("Client not connected")
+
+        client = cast(Any, self._client)
+        message = await client.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode=ParseMode.DISABLED if disable_markup else ParseMode.DEFAULT,
+            reply_to_message_id=reply_to_message_id,
+        )
+        return self._convert_message_to_info(message)
+
+    async def send_file(
+        self,
+        chat_id: Union[int, str],
+        file_path: Path,
+        caption: str = "",
+        reply_to_message_id: Optional[int] = None,
+        disable_markup: bool = False,
+    ) -> MessageInfo:
+        """Send a file as document with an optional markup caption."""
+        if not self._client or not self._is_connected:
+            raise RuntimeError("Client not connected")
+
+        client = cast(Any, self._client)
+        message = await client.send_document(
+            chat_id=chat_id,
+            document=str(file_path),
+            caption=caption,
+            parse_mode=ParseMode.DISABLED if disable_markup else ParseMode.DEFAULT,
+            reply_to_message_id=reply_to_message_id,
+        )
+        return self._convert_message_to_info(message)
+
     async def download_message_media(
         self, message: MessageInfo, output_dir: Path
     ) -> Optional[Path]:
@@ -313,7 +360,7 @@ class TelegramClient:
         downloaded.rename(named)
         return named
 
-    def _convert_chat_to_info(self, chat: Union[Chat, ChatPreview]) -> ChatInfo:
+    def _convert_chat_to_info(self, chat: Chat) -> ChatInfo:
         """Convert Pyrogram Chat to our ChatInfo model.
 
         Private chats carry first/last name instead of a title, so a title is

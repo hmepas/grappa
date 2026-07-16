@@ -8,6 +8,7 @@ from grappa.chat_manager import ChatManager
 from grappa.client import TelegramClient
 from grappa.config import get_settings
 from grappa.data.models import MessageInfo
+from grappa.message_parser.markdown import md_to_telegram
 from grappa.storage.cache_storage import CacheStorage
 
 
@@ -83,6 +84,38 @@ class MessageManager:
         if messages:
             await self.storage.save_messages(resolved, messages)
         return messages
+
+    async def send_message(
+        self,
+        chat_ref: Union[int, str],
+        text: str = "",
+        file_path: Optional[Path] = None,
+        reply_to_message_id: Optional[int] = None,
+        markdown: bool = True,
+    ) -> MessageInfo:
+        """Send a text message or a file (text becomes its caption).
+
+        The sent message is deliberately not merged into the local cache:
+        that could raise the cached max id past unseen messages of other
+        members and make the next delta sync skip them.
+        """
+        payload = md_to_telegram(text) if markdown and text else text
+        resolved = await self.chat_manager.resolve_chat(chat_ref)
+        async with self._client_context() as client:
+            if file_path is not None:
+                return await client.send_file(
+                    chat_id=resolved,
+                    file_path=file_path,
+                    caption=payload,
+                    reply_to_message_id=reply_to_message_id,
+                    disable_markup=not markdown,
+                )
+            return await client.send_message(
+                chat_id=resolved,
+                text=payload,
+                reply_to_message_id=reply_to_message_id,
+                disable_markup=not markdown,
+            )
 
     async def search_cached_messages(
         self,

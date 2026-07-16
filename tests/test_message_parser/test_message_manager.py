@@ -67,6 +67,16 @@ class FakeClient:
         path.write_bytes(b"data")
         return path
 
+    async def send_message(self, **kwargs: Any) -> MessageInfo:
+        """Record a send_message call and return a stub sent message."""
+        self.calls.append({"method": "send_message", **kwargs})
+        return make_message(100, text=kwargs.get("text"))
+
+    async def send_file(self, **kwargs: Any) -> MessageInfo:
+        """Record a send_file call and return a stub sent message."""
+        self.calls.append({"method": "send_file", **kwargs})
+        return make_message(101, text=kwargs.get("caption"))
+
 
 @pytest.fixture
 def storage(tmp_path: Path) -> CacheStorage:
@@ -159,6 +169,76 @@ class TestSyncChat:
         path = new_messages[0].downloaded_media_path
         assert path is not None
         assert path.parent == custom_dir
+
+
+class TestSendMessage:
+    """Tests for sending messages and files."""
+
+    @pytest.mark.asyncio
+    async def test_send_converts_markdown(
+        self, storage: CacheStorage, tmp_path: Path
+    ) -> None:
+        """Text is converted to Telegram markup before sending."""
+        client = FakeClient([])
+        manager = make_manager(storage, client, tmp_path)
+
+        sent = await manager.send_message(CHAT_ID, text="> цитата\n**жирный**")
+
+        call = client.calls[0]
+        assert call["method"] == "send_message"
+        assert call["text"] == "<blockquote>цитата</blockquote>\n**жирный**"
+        assert call["disable_markup"] is False
+        assert sent.id == 100
+
+    @pytest.mark.asyncio
+    async def test_send_plain_skips_conversion(
+        self, storage: CacheStorage, tmp_path: Path
+    ) -> None:
+        """markdown=False sends the text untouched with markup disabled."""
+        client = FakeClient([])
+        manager = make_manager(storage, client, tmp_path)
+
+        await manager.send_message(CHAT_ID, text="> as is", markdown=False)
+
+        call = client.calls[0]
+        assert call["text"] == "> as is"
+        assert call["disable_markup"] is True
+
+    @pytest.mark.asyncio
+    async def test_send_file_with_caption_and_reply(
+        self, storage: CacheStorage, tmp_path: Path
+    ) -> None:
+        """Files go through send_file with converted caption and reply id."""
+        client = FakeClient([])
+        manager = make_manager(storage, client, tmp_path)
+        attachment = tmp_path / "report.pdf"
+
+        await manager.send_message(
+            CHAT_ID,
+            text="**подпись**",
+            file_path=attachment,
+            reply_to_message_id=42,
+        )
+
+        call = client.calls[0]
+        assert call["method"] == "send_file"
+        assert call["file_path"] == attachment
+        assert call["caption"] == "**подпись**"
+        assert call["reply_to_message_id"] == 42
+
+    @pytest.mark.asyncio
+    async def test_sent_message_is_not_cached(
+        self, storage: CacheStorage, tmp_path: Path
+    ) -> None:
+        """Sending must not advance the cached max id past unseen messages."""
+        await storage.save_messages(CHAT_ID, [make_message(1)])
+        client = FakeClient([])
+        manager = make_manager(storage, client, tmp_path)
+
+        await manager.send_message(CHAT_ID, text="hello")
+
+        cached = await storage.load_messages(CHAT_ID)
+        assert [m.id for m in cached] == [1]
 
 
 class TestSaveMessagesMerge:

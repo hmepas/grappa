@@ -32,6 +32,7 @@
 - `poetry run grappa messages sync <chat>` - докачать только новые сообщения (дельта) с медиа
 - `poetry run grappa messages list <chat> [--text]` - показать локальную копию чата
 - `poetry run grappa messages search "query" [--chat <chat>] [--api]` - поиск сообщений
+- `poetry run grappa messages send <chat> "text" [--file PATH] [--reply-to ID]` - отправить сообщение/файл
 - `poetry run grappa folders sync` - синхронизировать Telegram folders
 - `poetry run grappa folders list` - список folders
 - `poetry run grappa folders chats <folder>` - чаты из выбранной папки
@@ -53,7 +54,7 @@
 │   ├── main.py               # CLI приложение (entry point `grappa`)
 │   ├── 📁 client/            # Telegram клиент
 │   │   ├── __init__.py       # Экспорты модуля
-│   │   └── telegram_client.py # Основной клиент с Pyrogram
+│   │   └── telegram_client.py # Основной клиент с Pyrogram (форк kurigram)
 │   ├── 📁 config/            # Конфигурация
 │   │   └── settings.py       # Настройки через Pydantic Settings
 │   ├── 📁 data/              # Модели данных
@@ -217,6 +218,48 @@ poetry run grappa messages search "важный текст" --chat @chat_usernam
 # через Telegram API
 poetry run grappa messages search "важный текст" --chat @chat_username --api
 ```
+
+### Отправка сообщений и файлов
+
+```bash
+# текстовое сообщение (Markdown включён по умолчанию)
+poetry run grappa messages send @chat_username "Привет, **жирный** мир"
+
+# ответ на сообщение (id берётся из `messages list`)
+poetry run grappa messages send @chat_username "отвечаю" --reply-to 12345
+
+# файл (уходит документом), текст становится подписью
+poetry run grappa messages send @chat_username "подпись к файлу" --file ./report.pdf
+
+# отключить разметку и отправить текст как есть
+poetry run grappa messages send @chat_username "*звёздочки* останутся" --plain
+
+# себе в Saved Messages
+poetry run grappa messages send me "заметка"
+```
+
+#### Markdown cheat sheet
+
+Диалект Telegram (не стандартный Markdown!):
+
+| Markdown | Результат в Telegram |
+|---|---|
+| `**текст**` | **жирный** |
+| `__текст__` | *курсив* |
+| `--текст--` | подчёркнутый |
+| `~~текст~~` | ~~зачёркнутый~~ |
+| `` `код` `` | `inline code` |
+| `[текст](https://example.com/)` | ссылка |
+| `> строка` (в начале строки) | цитата; соседние `>`-строки сливаются в одну цитату |
+| ```` ```python ``` ```` (блок) | блок кода с подсветкой языка |
+| `\|\|текст\|\|` | спойлер |
+
+Нюансы:
+- Стандартные `*курсив*` и `_курсив_` **не работают** - курсив только через `__текст__`.
+- `__` - курсив (не жирный, как в стандартном Markdown); подчёркивание - `--текст--`.
+- Литеральные `<`, `>`, `&` писать можно как есть (`` `List<int>` `` уйдёт корректно).
+- Внутри ` ``` `-блоков разметка (включая `>`-цитаты) не интерпретируется.
+- `--plain` отключает всю разметку.
 
 ### Отладочный режим
 ```bash

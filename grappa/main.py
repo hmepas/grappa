@@ -590,6 +590,54 @@ async def messages_sync(
         console.print(f"❌ Error: {e}", style="red")
 
 
+@messages.command("send")
+@click.argument("chat")
+@click.argument("text", required=False)
+@click.option(
+    "--file",
+    "file_path",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Send a file as document; TEXT becomes its caption",
+)
+@click.option(
+    "--reply-to",
+    "reply_to",
+    default=None,
+    type=int,
+    help="Message id to reply to (see `messages list`)",
+)
+@click.option("--plain", is_flag=True, help="Send text as-is without Markdown parsing")
+async def messages_send(
+    chat: str,
+    text: Optional[str],
+    file_path: Optional[Path],
+    reply_to: Optional[int],
+    plain: bool,
+) -> None:
+    """Send a text message or a file to a chat.
+
+    TEXT supports Telegram Markdown: **bold**, __italic__, --underline--,
+    ~~strike~~, ||spoiler||, `code`, ```pre```, [text](url), > quote lines.
+    """
+    try:
+        if not text and not file_path:
+            raise click.ClickException("Provide message TEXT and/or --file")
+        manager = MessageManager()
+        console.print("⏳ Sending...", style="yellow")
+        sent = await manager.send_message(
+            chat_ref=chat,
+            text=text or "",
+            file_path=file_path,
+            reply_to_message_id=reply_to,
+            markdown=not plain,
+        )
+        what = f"file {file_path.name}" if file_path else "message"
+        console.print(f"✅ Sent {what} #{sent.id} to chat {sent.chat_id}", style="green")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
 @messages.command("search")
 @click.argument("query")
 @click.option("--chat", default=None, help="Search inside one chat only")
