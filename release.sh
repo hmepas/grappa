@@ -1,4 +1,4 @@
-#!/binb/bash
+#!/bin/bash
 
 VER=$1
 if [ -z "$VER" ]; then
@@ -7,7 +7,6 @@ if [ -z "$VER" ]; then
 fi
 
 # 1. Поднять версию в pyproject.toml (version = "0.1.4"), закоммитить
-cd ~/projects/grappa
 git commit -am "release v$VER"
 
 # 2. Тег и пуш (тег обязательно запушить — из него собирается tarball для brew)
